@@ -143,7 +143,7 @@ export async function getOrders(params?: {
   sp.set("limit", String(params?.limit ?? 50));
   sp.set("direction", "desc");
   const path = `/v2/orders?${sp.toString()}`;
-  const data = (await alpacaFetch("GET", path)) as AlpacaOrder[];
+  const data = (await alpacaFetch("GET", path)) as unknown as AlpacaOrder[];
   return Array.isArray(data) ? data : [];
 }
 
@@ -160,6 +160,6 @@ export type AlpacaPosition = {
 };
 
 export async function getPositions(): Promise<AlpacaPosition[]> {
-  const data = (await alpacaFetch("GET", "/v2/positions")) as AlpacaPosition[];
+  const data = (await alpacaFetch("GET", "/v2/positions")) as unknown as AlpacaPosition[];
   return Array.isArray(data) ? data : [];
 }
