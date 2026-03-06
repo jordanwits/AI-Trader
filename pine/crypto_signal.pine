@@ -24,17 +24,17 @@ bb_mult = input.float(2.0, "Bollinger Multiplier", minval=1.5, maxval=3.0, step=
 
 // Volume
 vol_ma_len = input.int(20, "Volume MA Length", minval=10, maxval=50, group="Volume")
-vol_mult = input.float(1.5, "Volume Spike Multiplier", minval=1.2, maxval=3.0, step=0.1, group="Volume")
+vol_mult = input.float(1.2, "Volume Spike Multiplier", minval=1.0, maxval=3.0, step=0.1, group="Volume")
 
 // Filters
-min_adx = input.int(20, "Min ADX", minval=10, maxval=35, group="Filters")
-use_vwap = input.bool(true, "Use VWAP Filter", group="Filters")
-use_htf_trend = input.bool(true, "Use Higher TF Trend", group="Filters")
+min_adx = input.int(15, "Min ADX", minval=10, maxval=35, group="Filters")
+use_vwap = input.bool(false, "Use VWAP Filter", group="Filters")
+use_htf_trend = input.bool(false, "Use Higher TF Trend", group="Filters")
 htf_ema_len = input.int(21, "HTF EMA Length", minval=10, maxval=50, group="Filters")
 
 // Noise Reduction
 use_heikin_ashi = input.bool(true, "Use Heikin Ashi for Signals", group="Noise Reduction")
-confirm_bars = input.int(1, "Confirmation Bars", minval=0, maxval=3, group="Noise Reduction")
+confirm_bars = input.int(0, "Confirmation Bars", minval=0, maxval=3, group="Noise Reduction")
 
 // === HEIKIN ASHI CALCULATION ===
 ha_close = (open + high + low + close) / 4

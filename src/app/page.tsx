@@ -41,6 +41,26 @@ type Trade = {
   alpaca_order_id: string | null;
   error: string | null;
 };
+type AlpacaOrder = {
+  id: string;
+  symbol: string;
+  qty: string;
+  side: string;
+  status: string;
+  filled_at: string | null;
+  submitted_at: string;
+  filled_avg_price: string | null;
+};
+type AlpacaPosition = {
+  symbol: string;
+  qty: string;
+  side: string;
+  market_value: string;
+  unrealized_pl: string;
+  unrealized_plpc: string;
+  current_price: string;
+  avg_entry_price: string;
+};
 
 function PortfolioChart({ history }: { history: PortfolioHistory }) {
   const { equity } = history;
@@ -104,6 +124,8 @@ export default function Home() {
   const [portfolioPeriod, setPortfolioPeriod] = useState<"1D" | "1M" | "1A">("1M");
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [trades, setTrades] = useState<Trade[] | null>(null);
+  const [alpacaOrders, setAlpacaOrders] = useState<AlpacaOrder[] | null>(null);
+  const [positions, setPositions] = useState<AlpacaPosition[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,20 +141,22 @@ export default function Home() {
     setError(null);
     try {
       const timeframe = portfolioPeriod === "1D" ? "15Min" : "1D";
-      const [hRes, sRes, pRes, aRes, tRes] = await Promise.all([
+      const [hRes, sRes, pRes, aRes, tRes, alpRes] = await Promise.all([
         fetch("/api/health"),
         fetch("/api/stats"),
         fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`),
         fetch("/api/alerts?limit=15"),
         fetch("/api/trades?limit=15"),
+        fetch("/api/alpaca-activity"),
       ]);
 
-      const [h, s, p, a, t] = await Promise.all([
+      const [h, s, p, a, t, alp] = await Promise.all([
         hRes.json().catch(() => null),
         sRes.json().catch(() => null),
         pRes.json().catch(() => null),
         aRes.json().catch(() => null),
         tRes.json().catch(() => null),
+        alpRes.json().catch(() => null),
       ]);
 
       setHealth(h?.ok !== undefined ? h : null);
@@ -140,6 +164,8 @@ export default function Home() {
       if (p?.account && p?.history) setPortfolio(p);
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
       setTrades(Array.isArray(t?.trades) ? t.trades : []);
+      setAlpacaOrders(Array.isArray(alp?.orders) ? alp.orders : []);
+      setPositions(Array.isArray(alp?.positions) ? alp.positions : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load dashboard");
     } finally {
@@ -150,7 +176,14 @@ export default function Home() {
   useEffect(() => {
     fetchAll();
     const iv = setInterval(fetchAll, 30_000);
-    return () => clearInterval(iv);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchAll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [fetchAll]);
 
   useEffect(() => {
@@ -392,14 +425,55 @@ export default function Home() {
           gap: "1.5rem",
         }}
       >
+        {positions && positions.length > 0 && (
+          <div className="card" style={{ gridColumn: "1 / -1" }}>
+            <div className="card-header">Open Positions</div>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Avg Entry</th>
+                    <th>Current</th>
+                    <th>Unrealized P&L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.map((pos) => (
+                    <tr key={pos.symbol}>
+                      <td className="mono">{pos.symbol}</td>
+                      <td className={pos.side === "long" ? "side-buy" : "side-sell"}>{pos.side}</td>
+                      <td className="mono">{pos.qty}</td>
+                      <td className="mono">${Number(pos.avg_entry_price).toFixed(2)}</td>
+                      <td className="mono">${Number(pos.current_price).toFixed(2)}</td>
+                      <td
+                        style={{
+                          color: Number(pos.unrealized_pl) >= 0 ? "var(--accent)" : "var(--accent-red)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        {Number(pos.unrealized_pl) >= 0 ? "+" : ""}$
+                        {Number(pos.unrealized_pl).toFixed(2)} (
+                        {(Number(pos.unrealized_plpc) * 100).toFixed(2)}%)
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <div className="card" style={{ gridColumn: "1 / -1" }}>
-          <div className="card-header">Recent Trades</div>
+          <div className="card-header">Recent Orders (Alpaca)</div>
           <div className="table-wrapper">
-            {loading && !trades ? (
+            {loading && alpacaOrders === null ? (
               <div className="loading-shimmer" style={{ height: 200 }} />
-            ) : !trades?.length ? (
+            ) : !alpacaOrders?.length ? (
               <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-secondary)" }}>
-                No trades yet
+                No orders yet
               </div>
             ) : (
               <table>
@@ -410,34 +484,23 @@ export default function Home() {
                     <th>Side</th>
                     <th>Qty</th>
                     <th>Status</th>
-                    <th>Error</th>
+                    <th>Avg Price</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {trades.map((t) => (
-                    <tr key={t.id}>
-                      <td className="mono" title={t.placed_at}>
-                        {formatTime(t.placed_at)}
+                  {alpacaOrders.map((o) => (
+                    <tr key={o.id}>
+                      <td className="mono" title={o.filled_at ?? o.submitted_at}>
+                        {formatTime(o.filled_at ?? o.submitted_at)}
                       </td>
-                      <td className="mono">{t.symbol ?? "—"}</td>
-                      <td className={t.side === "buy" ? "side-buy" : "side-sell"}>
-                        {t.side ?? "—"}
-                      </td>
-                      <td className="mono">{t.qty ?? "—"}</td>
+                      <td className="mono">{o.symbol}</td>
+                      <td className={o.side === "buy" ? "side-buy" : "side-sell"}>{o.side}</td>
+                      <td className="mono">{o.qty}</td>
                       <td>
-                        <span className={`badge ${t.status}`}>{t.status}</span>
+                        <span className={`badge ${o.status}`}>{o.status}</span>
                       </td>
-                      <td
-                        style={{
-                          maxWidth: 120,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                          color: t.error ? "var(--accent-red)" : "var(--text-secondary)",
-                        }}
-                        title={t.error ?? undefined}
-                      >
-                        {t.error ?? "—"}
+                      <td className="mono">
+                        {o.filled_avg_price ? `$${Number(o.filled_avg_price).toFixed(2)}` : "—"}
                       </td>
                     </tr>
                   ))}

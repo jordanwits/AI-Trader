@@ -3,10 +3,10 @@ indicator("AI Bot Starter Signal", overlay=true, max_boxes_count=500, max_labels
 
 // Inputs
 stop_atr_mult = input.float(1.5, "Stop ATR Multiplier", minval=0.5, step=0.1)
-rsi_ob = input.int(70, "RSI Overbought", minval=50, maxval=90)
-rsi_os = input.int(30, "RSI Oversold", minval=10, maxval=50)
-min_adx = input.int(20, "Min ADX (Trend Strength)", minval=10, maxval=50)
-vol_mult = input.float(1.2, "Volume Multiplier", minval=1.0, step=0.1)
+rsi_ob = input.int(75, "RSI Overbought", minval=50, maxval=90)
+rsi_os = input.int(25, "RSI Oversold", minval=10, maxval=50)
+min_adx = input.int(15, "Min ADX (Trend Strength)", minval=10, maxval=50)
+vol_mult = input.float(1.0, "Volume Multiplier", minval=1.0, step=0.1)
 
 // Indicators
 ema9 = ta.ema(close, 9)

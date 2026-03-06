@@ -52,6 +52,31 @@ export async function placeMarketOrder(
   return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
 }
 
+/** Place market order with a bracket stop-loss. Stop triggers at market when price hits stop_price. */
+export async function placeMarketOrderWithStopLoss(
+  symbol: string,
+  qty: number,
+  side: "buy" | "sell",
+  stopPrice: number
+): Promise<PlaceOrderResult> {
+  const stopRounded = Math.round(stopPrice * 100) / 100;
+  const body = {
+    symbol,
+    qty: Math.floor(qty),
+    side,
+    type: "market",
+    time_in_force: "day",
+    order_class: "bracket",
+    stop_loss: { stop_price: String(stopRounded) },
+  };
+
+  const raw = await alpacaFetch("POST", "/v2/orders", body);
+  const id = raw.id as string | undefined;
+  if (!id) throw new Error("Alpaca returned no order id");
+
+  return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
+}
+
 export type AlpacaAccount = {
   id: string;
   account_number: string;
@@ -95,4 +120,46 @@ export async function getPortfolioHistory(params: {
   const path = `/v2/account/portfolio/history${qs ? `?${qs}` : ""}`;
   const data = (await alpacaFetch("GET", path)) as PortfolioHistory;
   return data;
+}
+
+export type AlpacaOrder = {
+  id: string;
+  symbol: string;
+  qty: string;
+  side: string;
+  type: string;
+  status: string;
+  filled_at: string | null;
+  submitted_at: string;
+  filled_avg_price: string | null;
+};
+
+export async function getOrders(params?: {
+  status?: "open" | "closed" | "all";
+  limit?: number;
+}): Promise<AlpacaOrder[]> {
+  const sp = new URLSearchParams();
+  sp.set("status", params?.status ?? "all");
+  sp.set("limit", String(params?.limit ?? 50));
+  sp.set("direction", "desc");
+  const path = `/v2/orders?${sp.toString()}`;
+  const data = (await alpacaFetch("GET", path)) as AlpacaOrder[];
+  return Array.isArray(data) ? data : [];
+}
+
+export type AlpacaPosition = {
+  symbol: string;
+  qty: string;
+  side: string;
+  market_value: string;
+  cost_basis: string;
+  unrealized_pl: string;
+  unrealized_plpc: string;
+  current_price: string;
+  avg_entry_price: string;
+};
+
+export async function getPositions(): Promise<AlpacaPosition[]> {
+  const data = (await alpacaFetch("GET", "/v2/positions")) as AlpacaPosition[];
+  return Array.isArray(data) ? data : [];
 }

@@ -9,7 +9,7 @@ import {
 } from "@/lib/supabaseAdmin";
 import { preCheck, computeQty } from "@/lib/risk";
 import { decide } from "@/lib/aiDecider";
-import { placeMarketOrder } from "@/lib/alpaca";
+import { placeMarketOrderWithStopLoss } from "@/lib/alpaca";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 
@@ -147,10 +147,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const order = await placeMarketOrder(
+    const order = await placeMarketOrderWithStopLoss(
       parsed.ticker,
       qty,
-      parsed.action === "BUY" ? "buy" : "sell"
+      parsed.action === "BUY" ? "buy" : "sell",
+      stop
     );
 
     const trade = await insertTrade({

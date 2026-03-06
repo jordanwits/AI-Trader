@@ -11,9 +11,9 @@ const envSchema = z.object({
   WEBHOOK_SECRET: z.string().optional(),
   ACCOUNT_EQUITY: z.coerce.number().default(100_000),
   RISK_PER_TRADE_DOLLARS: z.coerce.number().default(50),
-  MAX_TRADES_PER_DAY: z.coerce.number().default(5),
-  MAX_DAILY_LOSS_DOLLARS: z.coerce.number().default(150),
-  COOLDOWN_SECONDS: z.coerce.number().default(180),
+  MAX_TRADES_PER_DAY: z.coerce.number().default(30),
+  MAX_DAILY_LOSS_DOLLARS: z.coerce.number().default(500),
+  COOLDOWN_SECONDS: z.coerce.number().default(60),
   MIN_STOP_DISTANCE: z.coerce.number().default(0.05),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 });
