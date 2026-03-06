@@ -51,3 +51,48 @@ export async function placeMarketOrder(
 
   return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
 }
+
+export type AlpacaAccount = {
+  id: string;
+  account_number: string;
+  cash: string;
+  buying_power: string;
+  equity: string;
+  last_equity: string;
+  portfolio_value: string;
+};
+
+export async function getAccount(): Promise<AlpacaAccount> {
+  const data = await alpacaFetch("GET", "/v2/account");
+  return {
+    id: data.id as string,
+    account_number: data.account_number as string,
+    cash: data.cash as string,
+    buying_power: data.buying_power as string,
+    equity: data.equity as string,
+    last_equity: data.last_equity as string,
+    portfolio_value: data.portfolio_value as string,
+  };
+}
+
+export type PortfolioHistory = {
+  timestamp: number[];
+  equity: number[];
+  profit_loss: number[];
+  profit_loss_pct: number[];
+  base_value: number;
+  timeframe: string;
+};
+
+export async function getPortfolioHistory(params: {
+  period?: "1D" | "1W" | "1M" | "1A";
+  timeframe?: "1Min" | "5Min" | "15Min" | "1H" | "1D";
+} = {}): Promise<PortfolioHistory> {
+  const sp = new URLSearchParams();
+  if (params.period) sp.set("period", params.period);
+  if (params.timeframe) sp.set("timeframe", params.timeframe);
+  const qs = sp.toString();
+  const path = `/v2/account/portfolio/history${qs ? `?${qs}` : ""}`;
+  const data = (await alpacaFetch("GET", path)) as PortfolioHistory;
+  return data;
+}

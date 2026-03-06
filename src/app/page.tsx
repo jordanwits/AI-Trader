@@ -4,6 +4,21 @@ import { useState, useEffect, useCallback } from "react";
 
 type Health = { ok: boolean; ts: string } | null;
 type Stats = { today: { trades_count: number; daily_loss_approx: number } } | null;
+type PortfolioAccount = {
+  cash: string;
+  buying_power: string;
+  equity: string;
+  portfolio_value: string;
+};
+type PortfolioHistory = {
+  timestamp: number[];
+  equity: number[];
+  profit_loss?: number[];
+  profit_loss_pct?: number[];
+  base_value: number;
+  timeframe: string;
+};
+type Portfolio = { account: PortfolioAccount; history: PortfolioHistory } | null;
 type Alert = {
   id: string;
   received_at: string;
@@ -27,6 +42,43 @@ type Trade = {
   error: string | null;
 };
 
+function PortfolioChart({ history }: { history: PortfolioHistory }) {
+  const { equity } = history;
+  if (!equity?.length) return null;
+  const min = Math.min(...equity);
+  const max = Math.max(...equity);
+  const range = max - min || 1;
+  const padding = { top: 8, right: 8, bottom: 8, left: 8 };
+  const w = 600;
+  const h = 184;
+  const chartW = w - padding.left - padding.right;
+  const chartH = h - padding.top - padding.bottom;
+  const bottomY = padding.top + chartH;
+  const coords = equity.map((eq, i) => {
+    const x = padding.left + (i / (equity.length - 1 || 1)) * chartW;
+    const y = padding.top + chartH - ((eq - min) / range) * chartH;
+    return { x, y };
+  });
+  const linePoints = coords.map((c) => `${c.x},${c.y}`).join(" ");
+  const areaPoints = [
+    `${padding.left},${bottomY}`,
+    ...coords.map((c) => `${c.x},${c.y}`),
+    `${padding.left + chartW},${bottomY}`,
+  ].join(" ");
+  return (
+    <svg className="portfolio-chart" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <linearGradient id="portfolioGradient" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.6" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon className="area" points={areaPoints} />
+      <polyline className="line" points={linePoints} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
 function formatTime(iso: string) {
   const d = new Date(iso);
   const now = new Date();
@@ -48,31 +100,44 @@ function formatDate(iso: string) {
 export default function Home() {
   const [health, setHealth] = useState<Health>(null);
   const [stats, setStats] = useState<Stats>(null);
+  const [portfolio, setPortfolio] = useState<Portfolio>(null);
+  const [portfolioPeriod, setPortfolioPeriod] = useState<"1D" | "1M" | "1A">("1M");
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
   const [trades, setTrades] = useState<Trade[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const fetchPortfolio = useCallback(async () => {
+    const timeframe = portfolioPeriod === "1D" ? "15Min" : "1D";
+    const res = await fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`);
+    const data = await res.json().catch(() => null);
+    if (data?.account && data?.history) setPortfolio(data);
+  }, [portfolioPeriod]);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [hRes, sRes, aRes, tRes] = await Promise.all([
+      const timeframe = portfolioPeriod === "1D" ? "15Min" : "1D";
+      const [hRes, sRes, pRes, aRes, tRes] = await Promise.all([
         fetch("/api/health"),
         fetch("/api/stats"),
+        fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`),
         fetch("/api/alerts?limit=15"),
         fetch("/api/trades?limit=15"),
       ]);
 
-      const [h, s, a, t] = await Promise.all([
+      const [h, s, p, a, t] = await Promise.all([
         hRes.json().catch(() => null),
         sRes.json().catch(() => null),
+        pRes.json().catch(() => null),
         aRes.json().catch(() => null),
         tRes.json().catch(() => null),
       ]);
 
       setHealth(h?.ok !== undefined ? h : null);
       setStats(s?.today !== undefined ? s : null);
+      if (p?.account && p?.history) setPortfolio(p);
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
       setTrades(Array.isArray(t?.trades) ? t.trades : []);
     } catch (e) {
@@ -80,13 +145,17 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [portfolioPeriod]);
 
   useEffect(() => {
     fetchAll();
     const iv = setInterval(fetchAll, 30_000);
     return () => clearInterval(iv);
   }, [fetchAll]);
+
+  useEffect(() => {
+    if (portfolioPeriod) fetchPortfolio();
+  }, [portfolioPeriod, fetchPortfolio]);
 
   const isHealthy = health?.ok === true;
 
@@ -153,6 +222,98 @@ export default function Home() {
           {error}
         </div>
       )}
+
+      <section className="card" style={{ marginBottom: "2rem" }}>
+        <div className="card-header">
+          <span>Your Portfolio</span>
+          <span style={{ fontSize: "0.7rem", color: "var(--text-secondary)" }}>
+            {portfolio?.account ? "Live" : "—"}
+          </span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "2rem", alignItems: "flex-start" }}>
+          <div>
+            <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: 0.25 }}>
+              Portfolio Value
+            </div>
+            {loading && !portfolio ? (
+              <div className="loading-shimmer" style={{ height: 36, width: 140 }} />
+            ) : (
+              <div style={{ fontSize: "1.75rem", fontWeight: 700 }}>
+                ${portfolio?.account ? Number(portfolio.account.equity || portfolio.account.portfolio_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+              </div>
+            )}
+            {(() => {
+              const pl = portfolio?.history?.profit_loss?.slice(-1)[0];
+              if (pl == null || !Number.isFinite(pl)) return null;
+              const pct = (portfolio?.history?.profit_loss_pct?.slice(-1)[0] ?? 0) * 100;
+              return (
+                <div
+                  style={{
+                    fontSize: "0.9rem",
+                    marginTop: 0.25,
+                    color: pl >= 0 ? "var(--accent)" : "var(--accent-red)",
+                  }}
+                >
+                  {pl >= 0 ? "+" : ""}${pl.toFixed(2)} ({pct.toFixed(2)}%)
+                </div>
+              );
+            })()}
+          </div>
+          <div>
+            <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: 0.25 }}>
+              Buying Power
+            </div>
+            <div className="mono" style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+              {portfolio?.account
+                ? `$${Number(portfolio.account.buying_power).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : "—"}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: "var(--text-secondary)", fontSize: "0.75rem", marginBottom: 0.25 }}>
+              Cash
+            </div>
+            <div className="mono" style={{ fontSize: "1.1rem", fontWeight: 600 }}>
+              {portfolio?.account
+                ? `$${Number(portfolio.account.cash).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : "—"}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: "1.5rem" }}>
+          <div className="period-tabs">
+            {(["1D", "1M", "1A"] as const).map((p) => (
+              <button
+                key={p}
+                className={portfolioPeriod === p ? "active" : ""}
+                onClick={() => setPortfolioPeriod(p)}
+              >
+                {p === "1A" ? "1Y" : p}
+              </button>
+            ))}
+          </div>
+          <div className="portfolio-chart">
+            {portfolio?.history?.equity?.length ? (
+              <PortfolioChart history={portfolio.history} />
+            ) : loading && !portfolio ? (
+              <div className="loading-shimmer" style={{ width: "100%", height: "100%", borderRadius: 8 }} />
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "100%",
+                  color: "var(--text-secondary)",
+                  fontSize: "0.9rem",
+                }}
+              >
+                No chart data
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
 
       <section className="dashboard-grid" style={{ marginBottom: "2rem" }}>
         <div className="card">
