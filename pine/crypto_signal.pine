@@ -1,0 +1,288 @@
+//@version=6
+indicator("Crypto Signal", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// === INPUTS ===
+// Trend
+ema_fast_len = input.int(8, "Fast EMA", minval=3, maxval=20, group="Trend")
+ema_slow_len = input.int(21, "Slow EMA", minval=10, maxval=50, group="Trend")
+ema_trend_len = input.int(50, "Trend EMA", minval=30, maxval=100, group="Trend")
+
+// Momentum
+rsi_len = input.int(14, "RSI Length", minval=5, maxval=25, group="Momentum")
+rsi_ob = input.int(70, "RSI Overbought", minval=60, maxval=85, group="Momentum")
+rsi_os = input.int(30, "RSI Oversold", minval=15, maxval=40, group="Momentum")
+stoch_k = input.int(14, "Stochastic K", minval=5, maxval=21, group="Momentum")
+stoch_d = input.int(3, "Stochastic D", minval=2, maxval=5, group="Momentum")
+stoch_smooth = input.int(3, "Stochastic Smooth", minval=2, maxval=5, group="Momentum")
+
+// Volatility
+atr_len = input.int(14, "ATR Length", minval=7, maxval=21, group="Volatility")
+stop_atr_mult = input.float(2.0, "Stop ATR Multiplier", minval=1.0, maxval=4.0, step=0.1, group="Volatility")
+tp_atr_mult = input.float(3.0, "TP ATR Multiplier", minval=1.5, maxval=6.0, step=0.1, group="Volatility")
+bb_len = input.int(20, "Bollinger Length", minval=10, maxval=30, group="Volatility")
+bb_mult = input.float(2.0, "Bollinger Multiplier", minval=1.5, maxval=3.0, step=0.1, group="Volatility")
+
+// Volume
+vol_ma_len = input.int(20, "Volume MA Length", minval=10, maxval=50, group="Volume")
+vol_mult = input.float(1.5, "Volume Spike Multiplier", minval=1.2, maxval=3.0, step=0.1, group="Volume")
+
+// Filters
+min_adx = input.int(20, "Min ADX", minval=10, maxval=35, group="Filters")
+use_vwap = input.bool(true, "Use VWAP Filter", group="Filters")
+use_htf_trend = input.bool(true, "Use Higher TF Trend", group="Filters")
+htf_ema_len = input.int(21, "HTF EMA Length", minval=10, maxval=50, group="Filters")
+
+// Noise Reduction
+use_heikin_ashi = input.bool(true, "Use Heikin Ashi for Signals", group="Noise Reduction")
+confirm_bars = input.int(1, "Confirmation Bars", minval=0, maxval=3, group="Noise Reduction")
+
+// === HEIKIN ASHI CALCULATION ===
+ha_close = (open + high + low + close) / 4
+var float ha_open = na
+ha_open := na(ha_open[1]) ? (open + close) / 2 : (ha_open[1] + ha_close[1]) / 2
+ha_high = math.max(high, math.max(ha_open, ha_close))
+ha_low = math.min(low, math.min(ha_open, ha_close))
+
+src_close = use_heikin_ashi ? ha_close : close
+src_open = use_heikin_ashi ? ha_open : open
+src_high = use_heikin_ashi ? ha_high : high
+src_low = use_heikin_ashi ? ha_low : low
+
+// === TREND INDICATORS ===
+ema_fast = ta.ema(src_close, ema_fast_len)
+ema_slow = ta.ema(src_close, ema_slow_len)
+ema_trend = ta.ema(src_close, ema_trend_len)
+
+trend_bullish = ema_fast > ema_slow and ema_slow > ema_trend
+trend_bearish = ema_fast < ema_slow and ema_slow < ema_trend
+
+// Higher timeframe trend filter
+htf = timeframe.isintraday ? (timeframe.multiplier <= 15 ? "60" : "240") : "1D"
+htf_ema = request.security(syminfo.tickerid, htf, ta.ema(close, htf_ema_len), lookahead=barmerge.lookahead_off)
+htf_bullish = close > htf_ema
+htf_bearish = close < htf_ema
+htf_filter_long = use_htf_trend ? htf_bullish : true
+htf_filter_short = use_htf_trend ? htf_bearish : true
+
+// === MOMENTUM INDICATORS ===
+rsi_val = ta.rsi(src_close, rsi_len)
+rsi_bullish = rsi_val > 50 and rsi_val < rsi_ob
+rsi_bearish = rsi_val < 50 and rsi_val > rsi_os
+
+stoch_k_raw = ta.stoch(src_close, src_high, src_low, stoch_k)
+stoch_k_smooth = ta.sma(stoch_k_raw, stoch_smooth)
+stoch_d_smooth = ta.sma(stoch_k_smooth, stoch_d)
+stoch_bullish = stoch_k_smooth > stoch_d_smooth and stoch_k_smooth < 80
+stoch_bearish = stoch_k_smooth < stoch_d_smooth and stoch_k_smooth > 20
+
+// Momentum divergence detection (pre-calc for v6 lazy eval)
+rsi_lowest_5 = ta.lowest(rsi_val, 5)
+src_low_lowest_5 = ta.lowest(src_low, 5)
+rsi_highest_5 = ta.highest(rsi_val, 5)
+src_high_highest_5 = ta.highest(src_high, 5)
+rsi_higher_low = rsi_val > rsi_lowest_5[1] and src_low < src_low_lowest_5[1]
+rsi_lower_high = rsi_val < rsi_highest_5[1] and src_high > src_high_highest_5[1]
+
+// === VOLATILITY INDICATORS ===
+atr_val = ta.atr(atr_len)
+bb_mid = ta.sma(src_close, bb_len)
+bb_dev = bb_mult * ta.stdev(src_close, bb_len)
+bb_upper = bb_mid + bb_dev
+bb_lower = bb_mid - bb_dev
+bb_width = (bb_upper - bb_lower) / bb_mid
+bb_expanding = bb_width > ta.sma(bb_width, 10)
+bb_squeeze = bb_width < ta.sma(bb_width, 20) * 0.75
+
+price_near_bb_lower = src_close < bb_mid and src_close > bb_lower
+price_near_bb_upper = src_close > bb_mid and src_close < bb_upper
+
+// === VOLUME ANALYSIS ===
+vol_ma = ta.sma(volume, vol_ma_len)
+vol_spike = volume > vol_ma * vol_mult
+relative_vol = volume / vol_ma
+
+// On Balance Volume trend
+obv_delta = src_close > src_close[1] ? volume : src_close < src_close[1] ? -volume : 0.0
+obv_val = ta.cum(obv_delta)
+obv_ema = ta.ema(obv_val, 21)
+obv_bullish = obv_val > obv_ema
+obv_bearish = obv_val < obv_ema
+
+// === ADX / DMI ===
+[di_plus, di_minus, adx_val] = ta.dmi(14, 14)
+strong_trend = adx_val > min_adx
+di_bullish = di_plus > di_minus
+di_bearish = di_minus > di_plus
+
+// === VWAP ===
+vwap_val = ta.vwap(close)
+vwap_bullish = use_vwap ? close > vwap_val : true
+vwap_bearish = use_vwap ? close < vwap_val : true
+
+// === SIGNAL GENERATION ===
+// Primary entry conditions
+ema_cross_up = ta.crossover(ema_fast, ema_slow)
+ema_cross_down = ta.crossunder(ema_fast, ema_slow)
+
+// Pullback entries (trend continuation)
+pullback_long = trend_bullish and src_close < ema_slow and src_close > ema_trend and rsi_val < 45
+pullback_short = trend_bearish and src_close > ema_slow and src_close < ema_trend and rsi_val > 55
+
+// Breakout entries
+breakout_long = ta.crossover(src_close, bb_upper) and bb_expanding and vol_spike
+breakout_short = ta.crossunder(src_close, bb_lower) and bb_expanding and vol_spike
+
+// Reversal entries (counter-trend with divergence)
+reversal_long = rsi_higher_low and stoch_bullish and price_near_bb_lower and vol_spike
+reversal_short = rsi_lower_high and stoch_bearish and price_near_bb_upper and vol_spike
+
+// Confirmation tracking
+var int long_confirm_count = 0
+var int short_confirm_count = 0
+
+base_long = (ema_cross_up or pullback_long or breakout_long or reversal_long)
+base_short = (ema_cross_down or pullback_short or breakout_short or reversal_short)
+
+// Filter conditions
+long_filters = rsi_bullish and strong_trend and di_bullish and vwap_bullish and obv_bullish and htf_filter_long
+short_filters = rsi_bearish and strong_trend and di_bearish and vwap_bearish and obv_bearish and htf_filter_short
+
+// Volume confirmation required
+filtered_long = base_long and long_filters and vol_spike
+filtered_short = base_short and short_filters and vol_spike
+
+// Confirmation bar logic
+if filtered_long
+    long_confirm_count := long_confirm_count + 1
+else
+    long_confirm_count := 0
+
+if filtered_short
+    short_confirm_count := short_confirm_count + 1
+else
+    short_confirm_count := 0
+
+// Final signals
+longSignal = long_confirm_count >= confirm_bars + 1 and long_confirm_count[1] < confirm_bars + 1
+shortSignal = short_confirm_count >= confirm_bars + 1 and short_confirm_count[1] < confirm_bars + 1
+
+// === STOPS AND TARGETS ===
+long_stop = close - (atr_val * stop_atr_mult)
+short_stop = close + (atr_val * stop_atr_mult)
+long_tp = close + (atr_val * tp_atr_mult)
+short_tp = close - (atr_val * tp_atr_mult)
+
+// Trailing stop levels (can be used by bot)
+var float trailing_stop = na
+if longSignal
+    trailing_stop := long_stop
+else if shortSignal
+    trailing_stop := short_stop
+
+// === INTERVAL FORMATTING ===
+getInterval() =>
+    if timeframe.isintraday
+        str.tostring(timeframe.multiplier) + "m"
+    else if timeframe.isdaily
+        "1D"
+    else if timeframe.isweekly
+        "1W"
+    else if timeframe.ismonthly
+        "1M"
+    else
+        str.tostring(timeframe.multiplier) + timeframe.period
+
+intervalStr = getInterval()
+alertId = str.tostring(timenow)
+
+// === SIGNAL TYPE DETECTION ===
+getSignalType(is_long) =>
+    if is_long
+        if ema_cross_up
+            "crossover"
+        else if pullback_long
+            "pullback"
+        else if breakout_long
+            "breakout"
+        else
+            "reversal"
+    else
+        if ema_cross_down
+            "crossover"
+        else if pullback_short
+            "pullback"
+        else if breakout_short
+            "breakout"
+        else
+            "reversal"
+
+// === JSON PAYLOAD ===
+buildLongJson() =>
+    signal_type = getSignalType(true)
+    '{"alert_id":"' + alertId + '","ticker":"' + syminfo.ticker + '","timeframe":"' + intervalStr + '","action":"BUY","signal_type":"' + signal_type + '","price":' + str.tostring(close) + ',"stop":' + str.tostring(long_stop) + ',"take_profit":' + str.tostring(long_tp) + ',"atr":' + str.tostring(atr_val) + ',"meta":{"ema_fast":' + str.tostring(ema_fast) + ',"ema_slow":' + str.tostring(ema_slow) + ',"ema_trend":' + str.tostring(ema_trend) + ',"rsi":' + str.tostring(rsi_val) + ',"adx":' + str.tostring(adx_val) + ',"stoch_k":' + str.tostring(stoch_k_smooth) + ',"bb_width":' + str.tostring(bb_width) + ',"relative_volume":' + str.tostring(relative_vol) + ',"htf_trend":"bullish"}}'
+
+buildShortJson() =>
+    signal_type = getSignalType(false)
+    '{"alert_id":"' + alertId + '","ticker":"' + syminfo.ticker + '","timeframe":"' + intervalStr + '","action":"SELL","signal_type":"' + signal_type + '","price":' + str.tostring(close) + ',"stop":' + str.tostring(short_stop) + ',"take_profit":' + str.tostring(short_tp) + ',"atr":' + str.tostring(atr_val) + ',"meta":{"ema_fast":' + str.tostring(ema_fast) + ',"ema_slow":' + str.tostring(ema_slow) + ',"ema_trend":' + str.tostring(ema_trend) + ',"rsi":' + str.tostring(rsi_val) + ',"adx":' + str.tostring(adx_val) + ',"stoch_k":' + str.tostring(stoch_k_smooth) + ',"bb_width":' + str.tostring(bb_width) + ',"relative_volume":' + str.tostring(relative_vol) + ',"htf_trend":"bearish"}}'
+
+// === PLOTS ===
+plot(ema_fast, "Fast EMA", color=color.new(color.blue, 0), linewidth=1)
+plot(ema_slow, "Slow EMA", color=color.new(color.orange, 0), linewidth=2)
+plot(ema_trend, "Trend EMA", color=color.new(color.gray, 0), linewidth=2)
+plot(use_vwap ? vwap_val : na, "VWAP", color=color.new(color.purple, 0), linewidth=1)
+
+// Bollinger Bands
+p_bb_upper = plot(bb_upper, "BB Upper", color=color.new(color.teal, 70))
+p_bb_lower = plot(bb_lower, "BB Lower", color=color.new(color.teal, 70))
+fill(p_bb_upper, p_bb_lower, color=color.new(color.teal, 90))
+
+// Signal markers
+plotshape(longSignal, "Long Signal", shape.triangleup, location.belowbar, color.new(color.green, 0), size=size.normal)
+plotshape(shortSignal, "Short Signal", shape.triangledown, location.abovebar, color.new(color.red, 0), size=size.normal)
+
+// Stop levels on signal bars
+plot(longSignal ? long_stop : na, "Long Stop", color=color.red, style=plot.style_circles, linewidth=2)
+plot(shortSignal ? short_stop : na, "Short Stop", color=color.red, style=plot.style_circles, linewidth=2)
+plot(longSignal ? long_tp : na, "Long TP", color=color.green, style=plot.style_circles, linewidth=2)
+plot(shortSignal ? short_tp : na, "Short TP", color=color.green, style=plot.style_circles, linewidth=2)
+
+// Background color for trend
+bgcolor(trend_bullish ? color.new(color.green, 95) : trend_bearish ? color.new(color.red, 95) : na)
+
+// Squeeze indicator
+plotshape(bb_squeeze, "Squeeze", shape.diamond, location.bottom, color.new(color.yellow, 0), size=size.tiny)
+
+// === ALERTS ===
+if longSignal
+    alert(buildLongJson(), alert.freq_once_per_bar_close)
+
+if shortSignal
+    alert(buildShortJson(), alert.freq_once_per_bar_close)
+
+// === INFO TABLE ===
+var table info_table = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
+
+if barstate.islast
+    table.cell(info_table, 0, 0, "Trend", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 0, trend_bullish ? "BULLISH" : trend_bearish ? "BEARISH" : "NEUTRAL", text_color=trend_bullish ? color.green : trend_bearish ? color.red : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 1, "RSI", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 1, str.tostring(rsi_val, "#.0"), text_color=rsi_val > 70 ? color.red : rsi_val < 30 ? color.green : color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 2, "ADX", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 2, str.tostring(adx_val, "#.0"), text_color=adx_val > min_adx ? color.green : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 3, "Vol Ratio", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 3, str.tostring(relative_vol, "#.00") + "x", text_color=vol_spike ? color.green : color.gray, text_size=size.small)
+    
+    table.cell(info_table, 0, 4, "BB Width", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 4, str.tostring(bb_width * 100, "#.00") + "%", text_color=bb_squeeze ? color.yellow : color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 5, "HTF Trend", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 5, htf_bullish ? "BULLISH" : "BEARISH", text_color=htf_bullish ? color.green : color.red, text_size=size.small)
+    
+    table.cell(info_table, 0, 6, "Stoch K", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 6, str.tostring(stoch_k_smooth, "#.0"), text_color=stoch_k_smooth > 80 ? color.red : stoch_k_smooth < 20 ? color.green : color.white, text_size=size.small)
+    
+    table.cell(info_table, 0, 7, "ATR", text_color=color.white, text_size=size.small)
+    table.cell(info_table, 1, 7, str.tostring(atr_val, "#.00"), text_color=color.white, text_size=size.small)
