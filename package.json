@@ -1,0 +1,23 @@
+{
+  "name": "ai-trader",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "next": "14.2.0",
+    "openai": "^4.52.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "19.2.14",
+    "typescript": "^5.4.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

@@ -1,0 +1,73 @@
+//@version=5
+indicator("AI Bot Starter Signal", overlay=true, max_boxes_count=500, max_labels_count=500)
+
+// Inputs
+stop_atr_mult = input.float(1.5, "Stop ATR Multiplier", minval=0.5, step=0.1)
+rsi_ob = input.int(70, "RSI Overbought", minval=50, maxval=90)
+rsi_os = input.int(30, "RSI Oversold", minval=10, maxval=50)
+min_adx = input.int(20, "Min ADX (Trend Strength)", minval=10, maxval=50)
+vol_mult = input.float(1.2, "Volume Multiplier", minval=1.0, step=0.1)
+
+// Indicators
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+vwap_val = ta.vwap(close)
+rsi_val = ta.rsi(close, 14)
+atr_val = ta.atr(14)
+
+// ADX for trend strength
+[diplus, diminus, adx_val] = ta.dmi(14, 14)
+
+// Volume filter
+vol_avg = ta.sma(volume, 20)
+vol_spike = volume > vol_avg * vol_mult
+
+// Improved Signals with filters
+longSignal = ta.crossover(ema9, ema21) and close > vwap_val and rsi_val < rsi_ob and adx_val > min_adx and vol_spike
+shortSignal = ta.crossunder(ema9, ema21) and close < vwap_val and rsi_val > rsi_os and adx_val > min_adx and vol_spike
+
+// ATR-based stops (adapts to volatility)
+long_stop = close - (atr_val * stop_atr_mult)
+short_stop = close + (atr_val * stop_atr_mult)
+
+// Better interval formatting
+getInterval() =>
+    if timeframe.isintraday
+        str.tostring(timeframe.multiplier) + "m"
+    else if timeframe.isdaily
+        "1D"
+    else if timeframe.isweekly
+        "1W"
+    else if timeframe.ismonthly
+        "1M"
+    else
+        str.tostring(timeframe.multiplier) + timeframe.period
+
+intervalStr = getInterval()
+
+// Unique alert ID using timestamp
+alertId = str.tostring(timenow)
+
+// Build JSON payload
+buildLongJson() =>
+    '{"alert_id":"' + alertId + '","ticker":"' + syminfo.ticker + '","timeframe":"' + intervalStr + '","action":"BUY","price":' + str.tostring(close) + ',"stop":' + str.tostring(long_stop) + ',"atr":' + str.tostring(atr_val) + ',"meta":{"ema9":' + str.tostring(ema9) + ',"ema21":' + str.tostring(ema21) + ',"vwap":' + str.tostring(vwap_val) + ',"rsi":' + str.tostring(rsi_val) + ',"adx":' + str.tostring(adx_val) + ',"volume":' + str.tostring(volume) + ',"vol_avg":' + str.tostring(vol_avg) + '}}'
+
+buildShortJson() =>
+    '{"alert_id":"' + alertId + '","ticker":"' + syminfo.ticker + '","timeframe":"' + intervalStr + '","action":"SELL","price":' + str.tostring(close) + ',"stop":' + str.tostring(short_stop) + ',"atr":' + str.tostring(atr_val) + ',"meta":{"ema9":' + str.tostring(ema9) + ',"ema21":' + str.tostring(ema21) + ',"vwap":' + str.tostring(vwap_val) + ',"rsi":' + str.tostring(rsi_val) + ',"adx":' + str.tostring(adx_val) + ',"volume":' + str.tostring(volume) + ',"vol_avg":' + str.tostring(vol_avg) + '}}'
+
+// Plot
+plot(ema9, "EMA 9", color=color.blue, linewidth=2)
+plot(ema21, "EMA 21", color=color.orange, linewidth=2)
+plot(vwap_val, "VWAP", color=color.purple, linewidth=1)
+
+// Visual markers
+plotshape(longSignal, "Long", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(shortSignal, "Short", shape.triangledown, location.abovebar, color.red, size=size.small)
+
+// Alert triggers - use these when creating webhook alerts.
+// Create alert on this indicator, choose "Once Per Bar Close", set Webhook URL.
+if longSignal
+    alert(buildLongJson(), alert.freq_once_per_bar_close)
+
+if shortSignal
+    alert(buildShortJson(), alert.freq_once_per_bar_close)

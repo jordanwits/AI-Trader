@@ -1,0 +1,76 @@
+import OpenAI from "openai";
+import { z } from "zod";
+import { env } from "./env";
+import type { AlertPayload } from "./validate";
+
+const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+
+const DecisionSchema = z.object({
+  approve: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  entry: z.number().finite(),
+  stop: z.number().finite(),
+  target: z.number().finite(),
+  reason: z.string(),
+  notes: z.string(),
+});
+
+export type AIDecision = z.infer<typeof DecisionSchema>;
+
+// AI must only decide from payload - no live market fetch.
+const SYSTEM_PROMPT = `You are a paper-trading risk advisor. You receive alert signals (ticker, timeframe, action, price, stop, meta indicators).
+Your ONLY job: decide whether to approve or reject the trade based on the provided data.
+Output strictly valid JSON with: approve (bool), confidence (0-1), entry, stop, target (numbers), reason, notes (strings).
+Do NOT fetch any live market data. Use only the payload.`;
+
+export async function decide(alert: AlertPayload): Promise<
+  | { success: true; decision: AIDecision }
+  | { success: false; rawAi: string; blockedReason: string }
+> {
+  const userPrompt = `Signal: ${alert.ticker} ${alert.timeframe} ${alert.action} @ ${alert.price} stop ${alert.stop}. Meta: ${JSON.stringify(alert.meta ?? {})}. Output JSON only.`;
+
+  let rawContent: string;
+  try {
+    const resp = await openai.chat.completions.create({
+      model: env.OPENAI_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0,
+    });
+    rawContent = resp.choices[0]?.message?.content?.trim() ?? "";
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { success: false, rawAi: "", blockedReason: `OpenAI error: ${msg}` };
+  }
+
+  // Try to extract JSON from markdown code block if present
+  let jsonStr = rawContent;
+  const codeMatch = rawContent.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeMatch) jsonStr = codeMatch[1].trim();
+  else {
+    const brace = rawContent.indexOf("{");
+    if (brace >= 0) jsonStr = rawContent.slice(brace);
+  }
+
+  const parsed = z.unknown().safeParse(JSON.parse(jsonStr));
+  if (!parsed.success) {
+    return {
+      success: false,
+      rawAi: rawContent,
+      blockedReason: `Invalid AI JSON: ${parsed.error.message}`,
+    };
+  }
+
+  const decisionResult = DecisionSchema.safeParse(parsed.data);
+  if (!decisionResult.success) {
+    return {
+      success: false,
+      rawAi: rawContent,
+      blockedReason: `AI output schema invalid: ${decisionResult.error.message}`,
+    };
+  }
+
+  return { success: true, decision: decisionResult.data };
+}
