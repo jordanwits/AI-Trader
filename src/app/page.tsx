@@ -198,8 +198,8 @@ export default function Home() {
       setHealth(h?.ok !== undefined ? h : null);
       setStats(s?.today !== undefined ? s : null);
       if (p?.account && p?.history) setPortfolio(p);
-      setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
-      setDecisions(Array.isArray(d?.decisions) ? d.decisions : []);
+      setAlerts((prev) => (Array.isArray(a?.alerts) ? a.alerts : prev ?? []));
+      setDecisions((prev) => (Array.isArray(d?.decisions) ? d.decisions : prev ?? []));
       setTrades(Array.isArray(t?.trades) ? t.trades : []);
       if (!dRes.ok || (d?.error && !Array.isArray(d?.decisions))) setError((prev) => prev || `Decisions API error: ${d?.error ?? dRes.status}`);
       setAlpacaOrders(Array.isArray(alp?.orders) ? alp.orders : []);
