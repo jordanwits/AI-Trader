@@ -34,6 +34,18 @@ async function processAlertInBackground(
       return;
     }
 
+    // Alpaca crypto is spot-only: no short selling. SELL = open short; block crypto SELL.
+    const assetClass = await getAssetClass(alpacaSymbol);
+    if (parsed.action === "SELL" && assetClass === "crypto") {
+      await insertDecision({
+        alert_id: alert.id,
+        approve: false,
+        blocked_reason: "Alpaca crypto is spot-only; short selling not supported. SELL alerts for crypto are disabled.",
+      });
+      logger.info("Alert blocked: crypto short not supported", { alert_id: alert.id, symbol: alpacaSymbol });
+      return;
+    }
+
     const riskResult = await preCheck({ price: parsed.price, stop: parsed.stop, symbol: alpacaSymbol });
     if (!riskResult.ok) {
       await insertDecision({
