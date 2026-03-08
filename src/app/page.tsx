@@ -30,6 +30,14 @@ type Alert = {
   timeframe: string | null;
   parsed: unknown;
 };
+type Decision = {
+  id: string;
+  decided_at: string;
+  approve: boolean;
+  reason: string | null;
+  blocked_reason: string | null;
+  alert: { ticker: string | null; received_at: string; action: string | null } | null;
+};
 type Trade = {
   id: string;
   decision_id: string | null;
@@ -123,6 +131,7 @@ export default function Home() {
   const [portfolio, setPortfolio] = useState<Portfolio>(null);
   const [portfolioPeriod, setPortfolioPeriod] = useState<"1D" | "1M" | "1A">("1M");
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
+  const [decisions, setDecisions] = useState<Decision[] | null>(null);
   const [trades, setTrades] = useState<Trade[] | null>(null);
   const [alpacaOrders, setAlpacaOrders] = useState<AlpacaOrder[] | null>(null);
   const [positions, setPositions] = useState<AlpacaPosition[] | null>(null);
@@ -141,20 +150,22 @@ export default function Home() {
     setError(null);
     try {
       const timeframe = portfolioPeriod === "1D" ? "15Min" : "1D";
-      const [hRes, sRes, pRes, aRes, tRes, alpRes] = await Promise.all([
+      const [hRes, sRes, pRes, aRes, dRes, tRes, alpRes] = await Promise.all([
         fetch("/api/health"),
         fetch("/api/stats"),
         fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`),
         fetch("/api/alerts?limit=15"),
+        fetch("/api/decisions?limit=15"),
         fetch("/api/trades?limit=15"),
         fetch("/api/alpaca-activity"),
       ]);
 
-      const [h, s, p, a, t, alp] = await Promise.all([
+      const [h, s, p, a, d, t, alp] = await Promise.all([
         hRes.json().catch(() => null),
         sRes.json().catch(() => null),
         pRes.json().catch(() => null),
         aRes.json().catch(() => null),
+        dRes.json().catch(() => null),
         tRes.json().catch(() => null),
         alpRes.json().catch(() => null),
       ]);
@@ -163,6 +174,7 @@ export default function Home() {
       setStats(s?.today !== undefined ? s : null);
       if (p?.account && p?.history) setPortfolio(p);
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
+      setDecisions(Array.isArray(d?.decisions) ? d.decisions : []);
       setTrades(Array.isArray(t?.trades) ? t.trades : []);
       setAlpacaOrders(Array.isArray(alp?.orders) ? alp.orders : []);
       setPositions(Array.isArray(alp?.positions) ? alp.positions : []);
@@ -501,6 +513,50 @@ export default function Home() {
                       </td>
                       <td className="mono">
                         {o.filled_avg_price ? `$${Number(o.filled_avg_price).toFixed(2)}` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        <div className="card" style={{ gridColumn: "1 / -1" }}>
+          <div className="card-header">Recent Decisions (why alerts did/didn&apos;t trade)</div>
+          <div className="table-wrapper">
+            {loading && decisions === null ? (
+              <div className="loading-shimmer" style={{ height: 120 }} />
+            ) : !decisions?.length ? (
+              <div style={{ padding: "1.5rem", textAlign: "center", color: "var(--text-secondary)" }}>
+                No decisions yet
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Ticker</th>
+                    <th>Action</th>
+                    <th>Result</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {decisions.map((d) => (
+                    <tr key={d.id}>
+                      <td className="mono" title={d.decided_at}>
+                        {formatTime(d.decided_at)}
+                      </td>
+                      <td className="mono">{d.alert?.ticker ?? "—"}</td>
+                      <td>{d.alert?.action ?? "—"}</td>
+                      <td>
+                        <span className={`badge ${d.approve ? "filled" : "blocked"}`}>
+                          {d.approve ? "Approved" : "Blocked"}
+                        </span>
+                      </td>
+                      <td style={{ maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }} title={d.reason ?? d.blocked_reason ?? ""}>
+                        {d.reason ?? d.blocked_reason ?? "—"}
                       </td>
                     </tr>
                   ))}
