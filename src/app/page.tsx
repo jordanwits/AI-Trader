@@ -173,14 +173,15 @@ export default function Home() {
     setError(null);
     try {
       const timeframe = portfolioPeriod === "1D" ? "15Min" : "1D";
+      const noCache = { cache: "no-store" as RequestCache };
       const [hRes, sRes, pRes, aRes, dRes, tRes, alpRes] = await Promise.all([
-        fetch("/api/health"),
-        fetch("/api/stats"),
-        fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`),
-        fetch("/api/alerts?limit=25"),
-        fetch("/api/decisions?limit=25"),
-        fetch("/api/trades?limit=15"),
-        fetch("/api/alpaca-activity"),
+        fetch("/api/health", noCache),
+        fetch("/api/stats", noCache),
+        fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`, noCache),
+        fetch("/api/alerts?limit=25", noCache),
+        fetch("/api/decisions?limit=25", noCache),
+        fetch("/api/trades?limit=15", noCache),
+        fetch("/api/alpaca-activity", noCache),
       ]);
 
       const [h, s, p, a, d, t, alp] = await Promise.all([

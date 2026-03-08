@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "@/lib/env";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const limit = Math.min(Math.max(1, parseInt(req.nextUrl.searchParams.get("limit") ?? "50", 10)), 100);
@@ -17,7 +19,9 @@ export async function GET(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ alerts: data ?? [] });
+    return NextResponse.json({ alerts: data ?? [] }, {
+      headers: { "Cache-Control": "no-store, max-age=0" },
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 500 });
