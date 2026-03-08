@@ -9,6 +9,7 @@ const envSchema = z.object({
   OPENAI_API_KEY: z.string().min(1),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   WEBHOOK_SECRET: z.string().optional(),
+  CRON_SECRET: z.string().optional(),
   ACCOUNT_EQUITY: z.coerce.number().default(100_000),
   RISK_PER_TRADE_DOLLARS: z.coerce.number().default(100),
   MAX_TRADES_PER_DAY: z.coerce.number().default(30),

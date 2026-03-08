@@ -35,14 +35,16 @@ export type PlaceOrderResult = {
 export async function placeMarketOrder(
   symbol: string,
   qty: number,
-  side: "buy" | "sell"
+  side: "buy" | "sell",
+  assetClass: "crypto" | "us_equity" | null = "us_equity"
 ): Promise<PlaceOrderResult> {
+  const tif = assetClass === "crypto" ? "ioc" : "day";
   const body = {
     symbol,
-    qty: Math.floor(qty),
+    qty: assetClass === "crypto" ? qty : Math.floor(qty),
     side,
     type: "market",
-    time_in_force: "day",
+    time_in_force: tif,
   };
 
   const raw = await alpacaFetch("POST", "/v2/orders", body);
@@ -61,7 +63,35 @@ export function roundStopPrice(stopPrice: number): number {
   return Math.round(stopPrice * 100) / 100;
 }
 
-/** Place market order with a bracket stop-loss and take-profit. Alpaca requires both for bracket orders. */
+/** Enforce min distance from entry for stop/tp. Alpaca requires $0.01 for bracket; we use proportional for crypto too. */
+function clampStopTp(
+  side: "buy" | "sell",
+  stopPrice: number,
+  takeProfitPrice: number,
+  entryPrice: number
+): { sl: number; tp: number } {
+  let minDistance: number;
+  if (entryPrice < 0.1) minDistance = Math.max(0.0001, entryPrice * 0.02);
+  else if (entryPrice < 1) minDistance = Math.max(0.01, entryPrice * 0.02);
+  else if (entryPrice < 10) minDistance = Math.max(0.01, entryPrice * 0.015);
+  else minDistance = Math.max(0.01, entryPrice * 0.005);
+
+  let sl = stopPrice;
+  if (side === "buy" && sl > entryPrice - minDistance) sl = entryPrice - minDistance;
+  else if (side === "sell" && sl < entryPrice + minDistance) sl = entryPrice + minDistance;
+
+  let tp = takeProfitPrice;
+  if (side === "buy" && tp < entryPrice + minDistance) tp = entryPrice + minDistance;
+  else if (side === "sell" && tp > entryPrice - minDistance) tp = entryPrice - minDistance;
+
+  return { sl, tp };
+}
+
+/**
+ * Place market order with SL and TP. For crypto, Alpaca does not support bracket (OTCO) orders,
+ * so we place a simple market order, wait for fill, then place separate stop_limit and limit orders.
+ * For equities, uses bracket order.
+ */
 export async function placeMarketOrderWithStopLoss(
   symbol: string,
   qty: number,
@@ -70,33 +100,20 @@ export async function placeMarketOrderWithStopLoss(
   takeProfitPrice: number,
   entryPrice: number
 ): Promise<PlaceOrderResult> {
-  // Alpaca requires stop/tp at least $0.01 away from entry (base_price = fill price).
-  // Use proportional min distance so mid-priced crypto (XRP, ADA, etc.) have enough buffer for fill variance.
-  let minDistance: number;
-  if (entryPrice < 0.1) minDistance = entryPrice * 0.02;
-  else if (entryPrice < 1) minDistance = entryPrice * 0.02;
-  else if (entryPrice < 10) minDistance = Math.max(0.01, entryPrice * 0.015);  // 1.5% for XRP, AVAX, etc.
-  else minDistance = Math.max(0.01, entryPrice * 0.005);
-
-  let sl = stopPrice;
-  if (side === "buy" && sl > entryPrice - minDistance) {
-    sl = entryPrice - minDistance;
-  } else if (side === "sell" && sl < entryPrice + minDistance) {
-    sl = entryPrice + minDistance;
-  }
+  const assetClass = await getAssetClass(symbol);
+  const { sl, tp } = clampStopTp(side, stopPrice, takeProfitPrice, entryPrice);
   const slRounded = roundStopPrice(sl);
-
-  let tp = takeProfitPrice;
-  if (side === "buy" && tp < entryPrice + minDistance) {
-    tp = entryPrice + minDistance;
-  } else if (side === "sell" && tp > entryPrice - minDistance) {
-    tp = entryPrice - minDistance;
-  }
   const tpRounded = roundStopPrice(tp);
+  const qtyForOrder = assetClass === "crypto" ? qty : Math.floor(qty);
 
+  if (assetClass === "crypto") {
+    return placeCryptoOrderWithSlTp(symbol, qtyForOrder, side, slRounded, tpRounded);
+  }
+
+  // Equities: bracket order (OTCO)
   const body = {
     symbol,
-    qty: Math.floor(qty),
+    qty: qtyForOrder,
     side,
     type: "market",
     time_in_force: "day",
@@ -108,8 +125,78 @@ export async function placeMarketOrderWithStopLoss(
   const raw = await alpacaFetch("POST", "/v2/orders", body);
   const id = raw.id as string | undefined;
   if (!id) throw new Error("Alpaca returned no order id");
-
   return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
+}
+
+/** Crypto: market order, poll for fill, then place SL and TP as separate orders. SELL = close long only (no SL/TP). */
+async function placeCryptoOrderWithSlTp(
+  symbol: string,
+  qty: number,
+  side: "buy" | "sell",
+  stopPrice: number,
+  takeProfitPrice: number
+): Promise<PlaceOrderResult> {
+  const tif = "ioc";
+  const marketBody = {
+    symbol,
+    qty,
+    side,
+    type: "market",
+    time_in_force: tif,
+  };
+
+  const raw = await alpacaFetch("POST", "/v2/orders", marketBody);
+  const orderId = raw.id as string | undefined;
+  if (!orderId) throw new Error("Alpaca returned no order id");
+
+  const filled = await waitForOrderFill(orderId, 15_000);
+  if (filled == null) {
+    throw new Error("Crypto market order did not fill within 15 seconds");
+  }
+
+  if (side === "sell") {
+    return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
+  }
+
+  const gtc = "gtc";
+  const exitSide = "sell";
+  await alpacaFetch("POST", "/v2/orders", {
+    symbol,
+    qty,
+    side: exitSide,
+    type: "stop_limit",
+    time_in_force: gtc,
+    stop_price: String(stopPrice),
+    limit_price: String(Math.min(stopPrice, roundStopPrice(stopPrice * 0.999))),
+  });
+  await alpacaFetch("POST", "/v2/orders", {
+    symbol,
+    qty,
+    side: exitSide,
+    type: "limit",
+    time_in_force: gtc,
+    limit_price: String(takeProfitPrice),
+  });
+
+  return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
+}
+
+async function waitForOrderFill(orderId: string, timeoutMs: number): Promise<number | null> {
+  const start = Date.now();
+  const pollMs = 500;
+
+  while (Date.now() - start < timeoutMs) {
+    const order = await getOrder(orderId);
+    if (!order) return null;
+    if (order.status === "filled" && order.filled_avg_price) {
+      return parseFloat(order.filled_avg_price);
+    }
+    if (order.status === "canceled" || order.status === "rejected" || order.status === "expired") {
+      return null;
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  return null;
 }
 
 export type AlpacaAccount = {
@@ -172,11 +259,13 @@ export type AlpacaOrder = {
 export async function getOrders(params?: {
   status?: "open" | "closed" | "all";
   limit?: number;
+  symbols?: string[];
 }): Promise<AlpacaOrder[]> {
   const sp = new URLSearchParams();
   sp.set("status", params?.status ?? "all");
   sp.set("limit", String(params?.limit ?? 50));
   sp.set("direction", "desc");
+  if (params?.symbols?.length) sp.set("symbols", params.symbols.join(","));
   const path = `/v2/orders?${sp.toString()}`;
   const data = (await alpacaFetch("GET", path)) as unknown as AlpacaOrder[];
   return Array.isArray(data) ? data : [];
@@ -219,6 +308,40 @@ export async function resolveAlpacaSymbol(symbol: string): Promise<string | null
     }
   }
   return null;
+}
+
+/** Returns asset class for a symbol already in Alpaca format. Used to branch crypto vs equity order flow. */
+export async function getAssetClass(symbol: string): Promise<"crypto" | "us_equity" | null> {
+  try {
+    const data = (await alpacaFetch("GET", `/v2/assets/${encodeURIComponent(symbol)}`)) as { class?: string; asset_class?: string; tradable?: boolean };
+    if (data?.tradable !== true) return null;
+    const cls = data.class ?? data.asset_class;
+    if (cls === "crypto") return "crypto";
+    if (cls === "us_equity") return "us_equity";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches a single order by ID. */
+export async function getOrder(orderId: string): Promise<AlpacaOrder | null> {
+  try {
+    const data = (await alpacaFetch("GET", `/v2/orders/${encodeURIComponent(orderId)}`)) as AlpacaOrder;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/** Cancels an open order. */
+export async function cancelOrder(orderId: string): Promise<boolean> {
+  try {
+    await alpacaFetch("DELETE", `/v2/orders/${encodeURIComponent(orderId)}`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Returns true if symbol is tradeable on Alpaca. Skips AI when false to save tokens. */
