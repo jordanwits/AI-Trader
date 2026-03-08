@@ -1,12 +1,13 @@
 import { env } from "./env";
 import {
-  getLastTrade,
+  getLastTradeForSymbol,
   getTradesCountToday,
 } from "./supabaseAdmin";
 
 export type RiskPreCheckParams = {
   price: number;
   stop: number;
+  symbol: string;
 };
 
 export type RiskPreCheckResult =
@@ -22,7 +23,7 @@ function getMinStopDistance(price: number): number {
 }
 
 export async function preCheck(params: RiskPreCheckParams): Promise<RiskPreCheckResult> {
-  const { price, stop } = params;
+  const { price, stop, symbol } = params;
   const stopDistance = Math.abs(price - stop);
   const minRequired = getMinStopDistance(price);
 
@@ -41,14 +42,14 @@ export async function preCheck(params: RiskPreCheckParams): Promise<RiskPreCheck
     };
   }
 
-  const lastTrade = await getLastTrade();
+  const lastTrade = await getLastTradeForSymbol(symbol);
   if (lastTrade) {
     const placedAt = new Date(lastTrade.placed_at).getTime();
     const elapsed = (Date.now() - placedAt) / 1000;
     if (elapsed < env.COOLDOWN_SECONDS) {
       return {
         ok: false,
-        reason: `Cooldown: ${Math.ceil(env.COOLDOWN_SECONDS - elapsed)}s remaining`,
+        reason: `Cooldown on ${symbol}: ${Math.ceil(env.COOLDOWN_SECONDS - elapsed)}s remaining`,
       };
     }
   }

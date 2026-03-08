@@ -172,6 +172,20 @@ export async function getLastTrade(): Promise<TradeRow | null> {
   return data as TradeRow | null;
 }
 
+export async function getLastTradeForSymbol(symbol: string): Promise<TradeRow | null> {
+  const sb = getClient();
+  const { data, error } = await sb
+    .from("trades")
+    .select("id, decision_id, placed_at, status, qty, side, symbol, alpaca_order_id, alpaca_raw, error")
+    .eq("symbol", symbol)
+    .order("placed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as TradeRow | null;
+}
+
 export async function getTradesCountToday(): Promise<number> {
   const sb = getClient();
   const now = new Date();

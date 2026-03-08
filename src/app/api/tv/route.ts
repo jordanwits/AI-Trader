@@ -22,7 +22,19 @@ async function processAlertInBackground(
   parsed: AlertPayload
 ): Promise<void> {
   try {
-    const riskResult = await preCheck({ price: parsed.price, stop: parsed.stop });
+    // Resolve symbol early so we can pass it to preCheck (per-symbol cooldown) and match trades table.
+    const alpacaSymbol = await resolveAlpacaSymbol(parsed.ticker);
+    if (!alpacaSymbol) {
+      await insertDecision({
+        alert_id: alert.id,
+        approve: false,
+        blocked_reason: `Symbol ${parsed.ticker} not tradeable on Alpaca`,
+      });
+      logger.info("Alert blocked: symbol not tradeable", { alert_id: alert.id, symbol: parsed.ticker });
+      return;
+    }
+
+    const riskResult = await preCheck({ price: parsed.price, stop: parsed.stop, symbol: alpacaSymbol });
     if (!riskResult.ok) {
       await insertDecision({
         alert_id: alert.id,
@@ -51,18 +63,6 @@ async function processAlertInBackground(
         blocked_reason: "Invalid: stop must be above entry for a SELL (short)",
       });
       logger.info("Alert blocked: invalid stop/entry", { alert_id: alert.id });
-      return;
-    }
-
-    // Resolve to Alpaca symbol format (e.g. DOGE -> DOGEUSD). Skip AI if not tradeable.
-    const alpacaSymbol = await resolveAlpacaSymbol(parsed.ticker);
-    if (!alpacaSymbol) {
-      await insertDecision({
-        alert_id: alert.id,
-        approve: false,
-        blocked_reason: `Symbol ${parsed.ticker} not tradeable on Alpaca`,
-      });
-      logger.info("Alert blocked: symbol not tradeable", { alert_id: alert.id, symbol: parsed.ticker });
       return;
     }
 
@@ -158,7 +158,7 @@ async function processAlertInBackground(
         status: "failed",
         qty: 0,
         side: parsed.action.toLowerCase(),
-        symbol: parsed.ticker,
+        symbol: alpacaSymbol ?? parsed.ticker,
         error: msg,
       });
     } catch (insertErr) {

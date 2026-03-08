@@ -70,9 +70,13 @@ export async function placeMarketOrderWithStopLoss(
   takeProfitPrice: number,
   entryPrice: number
 ): Promise<PlaceOrderResult> {
-  // Alpaca requires stop/tp at least $0.01 away from entry.
-  // For micro-priced assets (<$1), use proportional min distance instead.
-  const minDistance = entryPrice < 1 ? entryPrice * 0.02 : 0.01;
+  // Alpaca requires stop/tp at least $0.01 away from entry (base_price = fill price).
+  // Use proportional min distance so mid-priced crypto (XRP, ADA, etc.) have enough buffer for fill variance.
+  let minDistance: number;
+  if (entryPrice < 0.1) minDistance = entryPrice * 0.02;
+  else if (entryPrice < 1) minDistance = entryPrice * 0.02;
+  else if (entryPrice < 10) minDistance = Math.max(0.01, entryPrice * 0.015);  // 1.5% for XRP, AVAX, etc.
+  else minDistance = Math.max(0.01, entryPrice * 0.005);
 
   let sl = stopPrice;
   if (side === "buy" && sl > entryPrice - minDistance) {
