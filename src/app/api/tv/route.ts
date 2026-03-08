@@ -91,6 +91,20 @@ async function processAlertInBackground(
 
     const entry = aiResult.decision.entry!;
     const stop = aiResult.decision.stop!;
+    const target = aiResult.decision.target;
+    if (target == null || !Number.isFinite(target)) {
+      await insertTrade({
+        decision_id: decision.id,
+        status: "failed",
+        qty: 0,
+        side: parsed.action.toLowerCase(),
+        symbol: alpacaSymbol,
+        error: "AI did not return valid target (required for Alpaca bracket order)",
+      });
+      logger.info("Alert blocked: no target", { alert_id: alert.id });
+      return;
+    }
+
     const qty = computeQty(entry, stop);
 
     if (qty <= 0) {
@@ -110,7 +124,8 @@ async function processAlertInBackground(
       alpacaSymbol,
       qty,
       parsed.action === "BUY" ? "buy" : "sell",
-      stop
+      stop,
+      target
     );
 
     await insertTrade({

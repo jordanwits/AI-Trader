@@ -59,6 +59,10 @@ export async function preCheck(params: RiskPreCheckParams): Promise<RiskPreCheck
 export function computeQty(entry: number, stop: number): number {
   const stopDistance = Math.abs(entry - stop);
   if (stopDistance < getMinStopDistance(entry)) return 0;
-  const qty = Math.floor(env.RISK_PER_TRADE_DOLLARS / stopDistance);
+  let qty = Math.floor(env.RISK_PER_TRADE_DOLLARS / stopDistance);
+  // When qty rounds to 0, allow 1 share if cost is under 2x risk (avoids over-leverage)
+  if (qty === 0 && entry > 0 && entry <= env.RISK_PER_TRADE_DOLLARS * 2) {
+    qty = 1;
+  }
   return Math.max(0, qty);
 }

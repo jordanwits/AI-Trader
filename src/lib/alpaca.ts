@@ -61,14 +61,17 @@ export function roundStopPrice(stopPrice: number): number {
   return Math.round(stopPrice * 100) / 100;
 }
 
-/** Place market order with a bracket stop-loss. Stop triggers at market when price hits stop_price. */
+/** Place market order with a bracket stop-loss and take-profit. Alpaca requires both for bracket orders. */
 export async function placeMarketOrderWithStopLoss(
   symbol: string,
   qty: number,
   side: "buy" | "sell",
-  stopPrice: number
+  stopPrice: number,
+  takeProfitPrice: number
 ): Promise<PlaceOrderResult> {
   const stopRounded = roundStopPrice(stopPrice);
+  const tpRounded = roundStopPrice(takeProfitPrice);
+  // Ensure take_profit is valid: BUY = TP above entry, SELL = TP below entry
   const body = {
     symbol,
     qty: Math.floor(qty),
@@ -77,6 +80,7 @@ export async function placeMarketOrderWithStopLoss(
     time_in_force: "day",
     order_class: "bracket",
     stop_loss: { stop_price: String(stopRounded) },
+    take_profit: { limit_price: String(tpRounded) },
   };
 
   const raw = await alpacaFetch("POST", "/v2/orders", body);
