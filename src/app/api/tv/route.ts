@@ -10,7 +10,7 @@ import {
 } from "@/lib/supabaseAdmin";
 import { preCheck, computeQty } from "@/lib/risk";
 import { decide } from "@/lib/aiDecider";
-import { placeMarketOrderWithStopLoss, resolveAlpacaSymbol } from "@/lib/alpaca";
+import { placeMarketOrderWithStopLoss, resolveAlpacaSymbol, getAccount, getAssetClass } from "@/lib/alpaca";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import type { AlertPayload } from "@/lib/validate";
@@ -105,7 +105,7 @@ async function processAlertInBackground(
       return;
     }
 
-    const qty = computeQty(entry, stop);
+    let qty = computeQty(entry, stop);
 
     if (qty <= 0) {
       await insertTrade({
@@ -118,6 +118,39 @@ async function processAlertInBackground(
       });
       logger.info("Alert blocked: qty <= 0", { alert_id: alert.id });
       return;
+    }
+
+    if (parsed.action === "BUY") {
+      const account = await getAccount();
+      const assetClass = await getAssetClass(alpacaSymbol);
+      const available = assetClass === "crypto" ? Number(account.cash) : Number(account.buying_power);
+      const maxNotional = available * 0.98;
+      const maxQty = maxNotional / entry;
+      if (maxQty < 1e-10) {
+        await insertTrade({
+          decision_id: decision.id,
+          status: "blocked",
+          qty: 0,
+          side: "buy",
+          symbol: alpacaSymbol,
+          error: "Insufficient buying power",
+        });
+        logger.info("Alert blocked: insufficient buying power", { alert_id: alert.id });
+        return;
+      }
+      qty = assetClass === "crypto" ? Math.min(qty, maxQty) : Math.min(qty, Math.floor(maxQty));
+      if (qty < 1e-10) {
+        await insertTrade({
+          decision_id: decision.id,
+          status: "blocked",
+          qty: 0,
+          side: "buy",
+          symbol: alpacaSymbol,
+          error: "Order size would exceed buying power",
+        });
+        logger.info("Alert blocked: order exceeds buying power", { alert_id: alert.id });
+        return;
+      }
     }
 
     const order = await placeMarketOrderWithStopLoss(
