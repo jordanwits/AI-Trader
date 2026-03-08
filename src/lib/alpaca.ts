@@ -107,7 +107,7 @@ export async function placeMarketOrderWithStopLoss(
   const qtyForOrder = assetClass === "crypto" ? qty : Math.floor(qty);
 
   if (assetClass === "crypto") {
-    return placeCryptoOrderWithSlTp(symbol, qtyForOrder, side, slRounded, tpRounded);
+    return placeCryptoOrderWithSlTp(symbol, qtyForOrder, side, slRounded, tpRounded, entryPrice);
   }
 
   // Equities: bracket order (OTCO)
@@ -128,13 +128,14 @@ export async function placeMarketOrderWithStopLoss(
   return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
 }
 
-/** Crypto: market order, poll for fill, then place SL and TP as separate orders. SELL = close long only (no SL/TP). */
+/** Crypto: market order, poll for fill, then place SL and TP as separate orders. Recalculates SL/TP from actual fill to handle slippage. SELL = close long only (no SL/TP). */
 async function placeCryptoOrderWithSlTp(
   symbol: string,
   qty: number,
   side: "buy" | "sell",
   stopPrice: number,
-  takeProfitPrice: number
+  takeProfitPrice: number,
+  signalEntryPrice: number
 ): Promise<PlaceOrderResult> {
   const tif = "ioc";
   const marketBody = {
@@ -149,11 +150,11 @@ async function placeCryptoOrderWithSlTp(
   const orderId = raw.id as string | undefined;
   if (!orderId) throw new Error("Alpaca returned no order id");
 
-  const filled = await waitForOrderFill(orderId, 30_000);
-  if (filled == null) {
+  let filledPrice: number | null = await waitForOrderFill(orderId, 30_000);
+  if (filledPrice == null) {
     const lastCheck = await getOrder(orderId);
     if (lastCheck?.status === "filled" && lastCheck.filled_avg_price) {
-      // Fill reported late; proceed with SL/TP
+      filledPrice = parseFloat(lastCheck.filled_avg_price);
     } else {
       throw new Error("Crypto market order did not fill within 30 seconds");
     }
@@ -163,6 +164,14 @@ async function placeCryptoOrderWithSlTp(
     return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
   }
 
+  const stopDistance = signalEntryPrice - stopPrice;
+  const tpDistance = takeProfitPrice - signalEntryPrice;
+  const slFromFill = filledPrice - stopDistance;
+  const tpFromFill = filledPrice + tpDistance;
+  const { sl, tp } = clampStopTp("buy", slFromFill, tpFromFill, filledPrice);
+  const slRounded = roundStopPrice(sl);
+  const tpRounded = roundStopPrice(tp);
+
   const gtc = "gtc";
   const exitSide = "sell";
   await alpacaFetch("POST", "/v2/orders", {
@@ -171,8 +180,8 @@ async function placeCryptoOrderWithSlTp(
     side: exitSide,
     type: "stop_limit",
     time_in_force: gtc,
-    stop_price: String(stopPrice),
-    limit_price: String(Math.min(stopPrice, roundStopPrice(stopPrice * 0.999))),
+    stop_price: String(slRounded),
+    limit_price: String(Math.min(slRounded, roundStopPrice(slRounded * 0.999))),
   });
   await alpacaFetch("POST", "/v2/orders", {
     symbol,
@@ -180,7 +189,7 @@ async function placeCryptoOrderWithSlTp(
     side: exitSide,
     type: "limit",
     time_in_force: gtc,
-    limit_price: String(takeProfitPrice),
+    limit_price: String(tpRounded),
   });
 
   return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
