@@ -149,9 +149,14 @@ async function placeCryptoOrderWithSlTp(
   const orderId = raw.id as string | undefined;
   if (!orderId) throw new Error("Alpaca returned no order id");
 
-  const filled = await waitForOrderFill(orderId, 15_000);
+  const filled = await waitForOrderFill(orderId, 30_000);
   if (filled == null) {
-    throw new Error("Crypto market order did not fill within 15 seconds");
+    const lastCheck = await getOrder(orderId);
+    if (lastCheck?.status === "filled" && lastCheck.filled_avg_price) {
+      // Fill reported late; proceed with SL/TP
+    } else {
+      throw new Error("Crypto market order did not fill within 30 seconds");
+    }
   }
 
   if (side === "sell") {
