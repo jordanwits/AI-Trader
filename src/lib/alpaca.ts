@@ -163,3 +163,21 @@ export async function getPositions(): Promise<AlpacaPosition[]> {
   const data = (await alpacaFetch("GET", "/v2/positions")) as unknown as AlpacaPosition[];
   return Array.isArray(data) ? data : [];
 }
+
+/** Returns true if symbol is tradeable on Alpaca. Skips AI when false to save tokens. Tries symbol as-is and +USD for crypto. */
+export async function isSymbolTradeable(symbol: string): Promise<boolean> {
+  const candidates = [symbol];
+  const clean = symbol.replace("/", "").toUpperCase();
+  if (!clean.endsWith("USD") && !clean.endsWith("USDT") && !clean.endsWith("USDC")) {
+    candidates.push(clean + "USD");
+  }
+  for (const sym of candidates) {
+    try {
+      const data = (await alpacaFetch("GET", `/v2/assets/${encodeURIComponent(sym)}`)) as { tradable?: boolean };
+      if (data?.tradable === true) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}

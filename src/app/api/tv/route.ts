@@ -10,7 +10,7 @@ import {
 } from "@/lib/supabaseAdmin";
 import { preCheck, computeQty } from "@/lib/risk";
 import { decide } from "@/lib/aiDecider";
-import { placeMarketOrderWithStopLoss } from "@/lib/alpaca";
+import { placeMarketOrderWithStopLoss, isSymbolTradeable } from "@/lib/alpaca";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import type { AlertPayload } from "@/lib/validate";
@@ -30,6 +30,39 @@ async function processAlertInBackground(
         blocked_reason: riskResult.reason,
       });
       logger.info("Alert blocked by risk", { alert_id: alert.id, reason: riskResult.reason });
+      return;
+    }
+
+    // Skip AI if entry/stop is nonsensical (would reject anyway)
+    const { price: entry, stop, action } = parsed;
+    if (action === "BUY" && stop >= entry) {
+      await insertDecision({
+        alert_id: alert.id,
+        approve: false,
+        blocked_reason: "Invalid: stop must be below entry for a BUY",
+      });
+      logger.info("Alert blocked: invalid stop/entry", { alert_id: alert.id });
+      return;
+    }
+    if (action === "SELL" && stop <= entry) {
+      await insertDecision({
+        alert_id: alert.id,
+        approve: false,
+        blocked_reason: "Invalid: stop must be above entry for a SELL (short)",
+      });
+      logger.info("Alert blocked: invalid stop/entry", { alert_id: alert.id });
+      return;
+    }
+
+    // Skip AI if symbol not tradeable on Alpaca (order would fail anyway)
+    const tradeable = await isSymbolTradeable(parsed.ticker);
+    if (!tradeable) {
+      await insertDecision({
+        alert_id: alert.id,
+        approve: false,
+        blocked_reason: `Symbol ${parsed.ticker} not tradeable on Alpaca`,
+      });
+      logger.info("Alert blocked: symbol not tradeable", { alert_id: alert.id, symbol: parsed.ticker });
       return;
     }
 
