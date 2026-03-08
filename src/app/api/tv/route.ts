@@ -148,8 +148,10 @@ async function processAlertInBackground(
       const account = await getAccount();
       const assetClass = await getAssetClass(alpacaSymbol);
       const available = assetClass === "crypto" ? Number(account.cash) : Number(account.buying_power);
-      const maxNotional = available * 0.98;
-      const maxQty = maxNotional / entry;
+      // Crypto: use 94% of cash and assume price may be 2% higher at fill (stale signal). Equities: 98%.
+      const cashBuffer = assetClass === "crypto" ? 0.94 : 0.98;
+      const maxNotional = available * cashBuffer;
+      const maxQty = assetClass === "crypto" ? maxNotional / (entry * 1.02) : maxNotional / entry;
       if (maxQty < 1e-10) {
         await insertTrade({
           decision_id: decision.id,
