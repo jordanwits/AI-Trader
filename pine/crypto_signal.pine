@@ -171,8 +171,10 @@ longSignal = long_confirm_count >= confirm_bars + 1 and long_confirm_count[1] < 
 shortSignal = short_confirm_count >= confirm_bars + 1 and short_confirm_count[1] < confirm_bars + 1
 
 // === STOPS AND TARGETS ===
+min_short_gap = close * 0.0001
+short_stop_raw = close + (atr_val * stop_atr_mult)
 long_stop = close - (atr_val * stop_atr_mult)
-short_stop = close + (atr_val * stop_atr_mult)
+short_stop = short_stop_raw > close + min_short_gap ? short_stop_raw : close + min_short_gap
 long_tp = close + (atr_val * tp_atr_mult)
 short_tp = close - (atr_val * tp_atr_mult)
 

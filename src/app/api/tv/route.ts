@@ -89,8 +89,20 @@ async function processAlertInBackground(
       return;
     }
 
-    const entry = aiResult.decision.entry!;
-    const stop = aiResult.decision.stop!;
+    // For SELL (short), AI sometimes returns stop <= entry (long-style). Use validated parsed values as fallback.
+    let entry = aiResult.decision.entry!;
+    let stop = aiResult.decision.stop!;
+    if (parsed.action === "SELL" && stop <= entry) {
+      logger.warn("AI returned invalid stop for SELL (stop <= entry), using parsed payload", {
+        alert_id: alert.id,
+        ai_entry: entry,
+        ai_stop: stop,
+        parsed_price: parsed.price,
+        parsed_stop: parsed.stop,
+      });
+      entry = parsed.price;
+      stop = parsed.stop;
+    }
     const target = aiResult.decision.target;
     if (target == null || !Number.isFinite(target)) {
       await insertTrade({

@@ -29,9 +29,11 @@ vwap_ok_short = use_vwap_filter ? close < vwap_val : true
 longSignal = ta.crossover(ema9, ema21) and vwap_ok_long and rsi_val < rsi_ob and adx_val > min_adx and vol_spike
 shortSignal = ta.crossunder(ema9, ema21) and vwap_ok_short and rsi_val > rsi_os and adx_val > min_adx and vol_spike
 
-// ATR-based stops (adapts to volatility)
+// ATR-based stops (adapts to volatility). Ensure short_stop > close (min 0.01% gap for shorts).
+min_short_gap = close * 0.0001
+short_stop_raw = close + (atr_val * stop_atr_mult)
 long_stop = close - (atr_val * stop_atr_mult)
-short_stop = close + (atr_val * stop_atr_mult)
+short_stop = short_stop_raw > close + min_short_gap ? short_stop_raw : close + min_short_gap
 
 // Better interval formatting
 getInterval() =>
