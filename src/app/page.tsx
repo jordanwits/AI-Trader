@@ -174,24 +174,25 @@ export default function Home() {
     try {
       const timeframe = portfolioPeriod === "1D" ? "15Min" : "1D";
       const noCache = { cache: "no-store" as RequestCache };
+      const ts = Date.now();
       const [hRes, sRes, pRes, aRes, dRes, tRes, alpRes] = await Promise.all([
-        fetch("/api/health", noCache),
-        fetch("/api/stats", noCache),
-        fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`, noCache),
-        fetch("/api/alerts?limit=25", noCache),
-        fetch("/api/decisions?limit=25", noCache),
-        fetch("/api/trades?limit=15", noCache),
-        fetch("/api/alpaca-activity", noCache),
+        fetch(`/api/health?_=${ts}`, noCache),
+        fetch(`/api/stats?_=${ts}`, noCache),
+        fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}&_=${ts}`, noCache),
+        fetch(`/api/alerts?limit=25&_=${ts}`, noCache),
+        fetch(`/api/decisions?limit=25&_=${ts}`, noCache),
+        fetch(`/api/trades?limit=15&_=${ts}`, noCache),
+        fetch(`/api/alpaca-activity?_=${ts}`, noCache),
       ]);
 
       const [h, s, p, a, d, t, alp] = await Promise.all([
-        hRes.json().catch(() => null),
-        sRes.json().catch(() => null),
-        pRes.json().catch(() => null),
-        aRes.json().catch(() => null),
-        dRes.json().catch(() => null),
-        tRes.json().catch(() => null),
-        alpRes.json().catch(() => null),
+        hRes.ok ? hRes.json().catch(() => null) : null,
+        sRes.ok ? sRes.json().catch(() => null) : null,
+        pRes.ok ? pRes.json().catch(() => null) : null,
+        aRes.ok ? aRes.json().catch(() => null) : null,
+        dRes.ok ? dRes.json().catch(() => null) : null,
+        tRes.ok ? tRes.json().catch(() => null) : null,
+        alpRes.ok ? alpRes.json().catch(() => null) : null,
       ]);
 
       setHealth(h?.ok !== undefined ? h : null);
@@ -200,7 +201,7 @@ export default function Home() {
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
       setDecisions(Array.isArray(d?.decisions) ? d.decisions : []);
       setTrades(Array.isArray(t?.trades) ? t.trades : []);
-      if (d?.error && !Array.isArray(d?.decisions)) setError(`Decisions API error: ${d.error}`);
+      if (!dRes.ok || (d?.error && !Array.isArray(d?.decisions))) setError((prev) => prev || `Decisions API error: ${d?.error ?? dRes.status}`);
       setAlpacaOrders(Array.isArray(alp?.orders) ? alp.orders : []);
       setPositions(Array.isArray(alp?.positions) ? alp.positions : []);
     } catch (e) {
