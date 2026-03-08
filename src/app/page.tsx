@@ -135,6 +135,29 @@ export default function Home() {
   const [trades, setTrades] = useState<Trade[] | null>(null);
   const [alpacaOrders, setAlpacaOrders] = useState<AlpacaOrder[] | null>(null);
   const [positions, setPositions] = useState<AlpacaPosition[] | null>(null);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [accountDebug, setAccountDebug] = useState<{
+    account: { equity: string; portfolio_value: string; cash: string; buying_power: string };
+    api_config?: { trading_url: string };
+    positions?: Array<{
+      symbol: string;
+      market_value: string;
+        unrealized_pl: string;
+        current_price: string;
+        avg_entry_price: string;
+        cost_basis: string;
+        qty: string;
+    }>;
+    reconciliation?: {
+      cash: number;
+      sum_positions_market_value: number;
+      computed_equity_cash_plus_positions: string;
+      account_equity_from_api: number;
+      difference: string;
+      note: string;
+    };
+    api_source: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -201,6 +224,26 @@ export default function Home() {
   useEffect(() => {
     if (portfolioPeriod) fetchPortfolio();
   }, [portfolioPeriod, fetchPortfolio]);
+
+  useEffect(() => {
+    if (!debugOpen) {
+      setAccountDebug(null);
+      return;
+    }
+    fetch("/api/account-debug")
+      .then((r) => r.json())
+      .then((d) => {
+          if (!d.error && d.account)
+            setAccountDebug({
+              account: d.account,
+              api_config: d.api_config,
+              positions: d.positions,
+              reconciliation: d.reconciliation,
+              api_source: d.api_source,
+            });
+      })
+      .catch(() => {});
+  }, [debugOpen]);
 
   const isHealthy = health?.ok === true;
 
@@ -284,7 +327,19 @@ export default function Home() {
               <div className="loading-shimmer" style={{ height: 36, width: 140 }} />
             ) : (
               <div style={{ fontSize: "1.75rem", fontWeight: 700 }}>
-                ${portfolio?.account ? Number(portfolio.account.equity || portfolio.account.portfolio_value || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—"}
+                $
+                {portfolio?.account
+                  ? (() => {
+                      const cash = Number(portfolio.account.cash);
+                      const positionsValue =
+                        positions?.reduce((sum, p) => sum + Number(p.market_value), 0) ?? 0;
+                      const reconciled = cash + positionsValue;
+                      return reconciled.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      });
+                    })()
+                  : "—"}
               </div>
             )}
             {(() => {
@@ -324,6 +379,86 @@ export default function Home() {
                 : "—"}
             </div>
           </div>
+        </div>
+        <div style={{ marginTop: "1rem" }}>
+          <button
+            type="button"
+            onClick={() => setDebugOpen((o) => !o)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--text-secondary)",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+              padding: 0,
+              textDecoration: "underline",
+            }}
+          >
+            {debugOpen ? "Hide" : "Compare with Alpaca"} – troubleshoot portfolio mismatch
+          </button>
+          {debugOpen && (
+            accountDebug ? (
+            <div
+              style={{
+                marginTop: "0.75rem",
+                padding: "0.75rem",
+                background: "var(--bg-secondary)",
+                borderRadius: 6,
+                fontSize: "0.8rem",
+                fontFamily: "monospace",
+              }}
+            >
+              <div style={{ marginBottom: "0.5rem", color: "var(--text-secondary)" }}>
+                Raw API response (our dashboard uses equity || portfolio_value)
+              </div>
+              <div>equity: {accountDebug.account.equity}</div>
+              <div>portfolio_value: {accountDebug.account.portfolio_value}</div>
+              <div>cash: {accountDebug.account.cash}</div>
+              <div>buying_power: {accountDebug.account.buying_power}</div>
+              {accountDebug.positions?.length ? (
+                <>
+                  <div style={{ marginTop: "0.75rem", marginBottom: "0.25rem", color: "var(--text-secondary)" }}>
+                    Positions (from /v2/positions) – compare market_value, unrealized_pl with Alpaca
+                  </div>
+                  {accountDebug.positions.map((p) => (
+                    <div key={p.symbol} style={{ marginLeft: "0.5rem" }}>
+                      {p.symbol}: market_value={p.market_value} unrealized_pl={p.unrealized_pl} current_price={p.current_price} cost_basis={p.cost_basis}
+                    </div>
+                  ))}
+                  {accountDebug.api_config && (
+                    <div style={{ marginTop: "0.5rem", color: "var(--text-secondary)" }}>
+                      Trading: {accountDebug.api_config.trading_url}
+                    </div>
+                  )}
+                </>
+              ) : null}
+              {accountDebug.reconciliation && (
+                <>
+                  <div style={{ marginTop: "0.75rem", marginBottom: "0.25rem", color: "var(--text-secondary)" }}>
+                    Reconciliation
+                  </div>
+                  <div>cash + sum(positions.market_value) = {accountDebug.reconciliation.computed_equity_cash_plus_positions}</div>
+                  <div>account.equity = {accountDebug.reconciliation.account_equity_from_api}</div>
+                  <div
+                    style={{
+                      color: Math.abs(Number(accountDebug.reconciliation.difference)) > 0.01 ? "var(--accent-red)" : "var(--accent)",
+                    }}
+                  >
+                    difference: {accountDebug.reconciliation.difference}
+                  </div>
+                  <div style={{ fontSize: "0.7rem", color: "var(--text-secondary)", marginTop: "0.25rem" }}>
+                    {accountDebug.reconciliation.note}
+                  </div>
+                </>
+              )}
+              <div style={{ marginTop: "0.5rem", color: "var(--accent)" }}>{accountDebug.api_source}</div>
+            </div>
+            ) : (
+              <div style={{ marginTop: "0.75rem", color: "var(--text-secondary)", fontSize: "0.8rem" }}>
+                Loading debug data…
+              </div>
+            )
+          )}
         </div>
         <div style={{ marginTop: "1.5rem" }}>
           <div className="period-tabs">
@@ -449,7 +584,7 @@ export default function Home() {
                     <th>Qty</th>
                     <th>Avg Entry</th>
                     <th>Current</th>
-                    <th>Unrealized P&L</th>
+                    <th>Total P&L</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -459,7 +594,10 @@ export default function Home() {
                       <td className={pos.side === "long" ? "side-buy" : "side-sell"}>{pos.side}</td>
                       <td className="mono">{pos.qty}</td>
                       <td className="mono">${Number(pos.avg_entry_price).toFixed(2)}</td>
-                      <td className="mono">${Number(pos.current_price).toFixed(2)}</td>
+                      <td className="mono">${(() => {
+                        const n = Number(pos.current_price);
+                        return Number.isFinite(n) ? n.toFixed(3).replace(/\.?0+$/, "") : pos.current_price;
+                      })()}</td>
                       <td
                         style={{
                           color: Number(pos.unrealized_pl) >= 0 ? "var(--accent)" : "var(--accent-red)",

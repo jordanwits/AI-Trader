@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAccount, getPortfolioHistory } from "@/lib/alpaca";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   try {
     const period = (req.nextUrl.searchParams.get("period") as "1D" | "1W" | "1M" | "1A" | null) ?? "1M";

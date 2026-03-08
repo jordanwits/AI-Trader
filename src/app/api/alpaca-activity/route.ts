@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getOrders, getPositions } from "@/lib/alpaca";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const [orders, positions] = await Promise.all([
