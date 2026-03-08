@@ -177,8 +177,8 @@ export default function Home() {
         fetch("/api/health"),
         fetch("/api/stats"),
         fetch(`/api/portfolio?period=${portfolioPeriod}&timeframe=${timeframe}`),
-        fetch("/api/alerts?limit=15"),
-        fetch("/api/decisions?limit=15"),
+        fetch("/api/alerts?limit=25"),
+        fetch("/api/decisions?limit=25"),
         fetch("/api/trades?limit=15"),
         fetch("/api/alpaca-activity"),
       ]);
@@ -199,6 +199,7 @@ export default function Home() {
       setAlerts(Array.isArray(a?.alerts) ? a.alerts : []);
       setDecisions(Array.isArray(d?.decisions) ? d.decisions : []);
       setTrades(Array.isArray(t?.trades) ? t.trades : []);
+      if (d?.error && !Array.isArray(d?.decisions)) setError(`Decisions API error: ${d.error}`);
       setAlpacaOrders(Array.isArray(alp?.orders) ? alp.orders : []);
       setPositions(Array.isArray(alp?.positions) ? alp.positions : []);
     } catch (e) {
