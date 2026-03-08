@@ -125,7 +125,8 @@ async function processAlertInBackground(
       qty,
       parsed.action === "BUY" ? "buy" : "sell",
       stop,
-      target
+      target,
+      entry
     );
 
     await insertTrade({

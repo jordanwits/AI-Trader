@@ -67,11 +67,19 @@ export async function placeMarketOrderWithStopLoss(
   qty: number,
   side: "buy" | "sell",
   stopPrice: number,
-  takeProfitPrice: number
+  takeProfitPrice: number,
+  entryPrice: number
 ): Promise<PlaceOrderResult> {
   const stopRounded = roundStopPrice(stopPrice);
-  const tpRounded = roundStopPrice(takeProfitPrice);
-  // Ensure take_profit is valid: BUY = TP above entry, SELL = TP below entry
+  // Alpaca: take_profit >= entry + 0.01 for BUY, <= entry - 0.01 for SELL. Enforce min distance.
+  const minTpDistance = Math.max(0.01, entryPrice * 0.0001);
+  let tp = takeProfitPrice;
+  if (side === "buy" && tp < entryPrice + minTpDistance) {
+    tp = entryPrice + minTpDistance;
+  } else if (side === "sell" && tp > entryPrice - minTpDistance) {
+    tp = entryPrice - minTpDistance;
+  }
+  const tpRounded = roundStopPrice(tp);
   const body = {
     symbol,
     qty: Math.floor(qty),
