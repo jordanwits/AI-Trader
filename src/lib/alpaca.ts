@@ -70,16 +70,26 @@ export async function placeMarketOrderWithStopLoss(
   takeProfitPrice: number,
   entryPrice: number
 ): Promise<PlaceOrderResult> {
-  const stopRounded = roundStopPrice(stopPrice);
-  // Alpaca: take_profit >= entry + 0.01 for BUY, <= entry - 0.01 for SELL. Enforce min distance.
-  const minTpDistance = Math.max(0.01, entryPrice * 0.0001);
+  // Alpaca requires stop/tp at least $0.01 away from entry.
+  // For micro-priced assets (<$1), use proportional min distance instead.
+  const minDistance = entryPrice < 1 ? entryPrice * 0.02 : 0.01;
+
+  let sl = stopPrice;
+  if (side === "buy" && sl > entryPrice - minDistance) {
+    sl = entryPrice - minDistance;
+  } else if (side === "sell" && sl < entryPrice + minDistance) {
+    sl = entryPrice + minDistance;
+  }
+  const slRounded = roundStopPrice(sl);
+
   let tp = takeProfitPrice;
-  if (side === "buy" && tp < entryPrice + minTpDistance) {
-    tp = entryPrice + minTpDistance;
-  } else if (side === "sell" && tp > entryPrice - minTpDistance) {
-    tp = entryPrice - minTpDistance;
+  if (side === "buy" && tp < entryPrice + minDistance) {
+    tp = entryPrice + minDistance;
+  } else if (side === "sell" && tp > entryPrice - minDistance) {
+    tp = entryPrice - minDistance;
   }
   const tpRounded = roundStopPrice(tp);
+
   const body = {
     symbol,
     qty: Math.floor(qty),
@@ -87,7 +97,7 @@ export async function placeMarketOrderWithStopLoss(
     type: "market",
     time_in_force: "day",
     order_class: "bracket",
-    stop_loss: { stop_price: String(stopRounded) },
+    stop_loss: { stop_price: String(slRounded) },
     take_profit: { limit_price: String(tpRounded) },
   };
 
