@@ -88,9 +88,12 @@ function clampStopTp(
 }
 
 /**
- * Place market order with SL and TP. For crypto, Alpaca does not support bracket (OTCO) orders,
- * so we place a simple market order, wait for fill, then place separate stop_limit and limit orders.
- * For equities, uses bracket order.
+ * Place market order with SL and TP. Both crypto and equities use the same flow:
+ * 1. Place market order
+ * 2. Wait for fill
+ * 3. Recalculate SL/TP from actual fill price (not alert price)
+ * 4. Place exit orders (crypto: separate orders; equities: OCO)
+ * This ensures take profit and stop loss are based on actual buy-in price.
  */
 export async function placeMarketOrderWithStopLoss(
   symbol: string,
@@ -98,34 +101,75 @@ export async function placeMarketOrderWithStopLoss(
   side: "buy" | "sell",
   stopPrice: number,
   takeProfitPrice: number,
-  entryPrice: number
+  signalEntryPrice: number
 ): Promise<PlaceOrderResult> {
   const assetClass = await getAssetClass(symbol);
-  const { sl, tp } = clampStopTp(side, stopPrice, takeProfitPrice, entryPrice);
-  const slRounded = roundStopPrice(sl);
-  const tpRounded = roundStopPrice(tp);
   const qtyForOrder = assetClass === "crypto" ? qty : Math.floor(qty);
 
   if (assetClass === "crypto") {
-    return placeCryptoOrderWithSlTp(symbol, qtyForOrder, side, slRounded, tpRounded, entryPrice);
+    return placeCryptoOrderWithSlTp(symbol, qtyForOrder, side, stopPrice, takeProfitPrice, signalEntryPrice);
   }
 
-  // Equities: bracket order (OTCO)
-  const body = {
+  return placeEquityOrderWithSlTp(symbol, qtyForOrder, side, stopPrice, takeProfitPrice, signalEntryPrice);
+}
+
+/** Equity: market order, poll for fill, then place OCO (SL + TP) based on actual fill price. */
+async function placeEquityOrderWithSlTp(
+  symbol: string,
+  qty: number,
+  side: "buy" | "sell",
+  stopPrice: number,
+  takeProfitPrice: number,
+  signalEntryPrice: number
+): Promise<PlaceOrderResult> {
+  const marketBody = {
     symbol,
-    qty: qtyForOrder,
+    qty,
     side,
     type: "market",
     time_in_force: "day",
-    order_class: "bracket",
-    stop_loss: { stop_price: String(slRounded) },
-    take_profit: { limit_price: String(tpRounded) },
   };
 
-  const raw = await alpacaFetch("POST", "/v2/orders", body);
-  const id = raw.id as string | undefined;
-  if (!id) throw new Error("Alpaca returned no order id");
-  return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
+  const raw = await alpacaFetch("POST", "/v2/orders", marketBody);
+  const orderId = raw.id as string | undefined;
+  if (!orderId) throw new Error("Alpaca returned no order id");
+
+  let fill: FillResult | null = await waitForOrderFill(orderId, 30_000);
+  if (fill == null) {
+    const lastCheck = await getOrder(orderId);
+    fill = extractFillFromOrder(lastCheck);
+    if (fill == null) {
+      throw new Error("Equity market order did not fill within 30 seconds");
+    }
+  }
+
+  if (side === "sell") {
+    return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
+  }
+
+  const { price: filledPrice, filledQty } = fill;
+  const stopDistance = signalEntryPrice - stopPrice;
+  const tpDistance = takeProfitPrice - signalEntryPrice;
+  const slFromFill = filledPrice - stopDistance;
+  const tpFromFill = filledPrice + tpDistance;
+  const { sl, tp } = clampStopTp("buy", slFromFill, tpFromFill, filledPrice);
+  const slRounded = roundStopPrice(sl);
+  const tpRounded = roundStopPrice(tp);
+  const slLimit = roundStopPrice(Math.min(slRounded, slRounded * 0.999));
+
+  await alpacaFetch("POST", "/v2/orders", {
+    symbol,
+    qty: Math.floor(filledQty),
+    side: "sell",
+    type: "limit",
+    limit_price: String(tpRounded),
+    time_in_force: "gtc",
+    order_class: "oco",
+    take_profit: { limit_price: String(tpRounded) },
+    stop_loss: { stop_price: String(slRounded), limit_price: String(slLimit) },
+  });
+
+  return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
 }
 
 type FillResult = { price: number; filledQty: number };
