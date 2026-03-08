@@ -172,12 +172,14 @@ export async function getLastTrade(): Promise<TradeRow | null> {
   return data as TradeRow | null;
 }
 
+/** Returns last successful trade for symbol (used for cooldown). Failed/blocked trades do not trigger cooldown. */
 export async function getLastTradeForSymbol(symbol: string): Promise<TradeRow | null> {
   const sb = getClient();
   const { data, error } = await sb
     .from("trades")
     .select("id, decision_id, placed_at, status, qty, side, symbol, alpaca_order_id, alpaca_raw, error")
     .eq("symbol", symbol)
+    .eq("status", "placed")
     .order("placed_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -186,6 +188,7 @@ export async function getLastTradeForSymbol(symbol: string): Promise<TradeRow | 
   return data as TradeRow | null;
 }
 
+/** Only counts trades with status "placed" (successful orders). Failed/blocked do not count. */
 export async function getTradesCountToday(): Promise<number> {
   const sb = getClient();
   const now = new Date();
@@ -195,6 +198,7 @@ export async function getTradesCountToday(): Promise<number> {
   const { count, error } = await sb
     .from("trades")
     .select("id", { count: "exact", head: true })
+    .eq("status", "placed")
     .gte("placed_at", startStr);
 
   if (error) throw error;

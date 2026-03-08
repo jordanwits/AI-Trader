@@ -17,6 +17,7 @@ export async function getTodayStats(): Promise<{
   const { count, error } = await client
     .from("trades")
     .select("id", { count: "exact", head: true })
+    .eq("status", "placed")
     .gte("placed_at", startStr);
 
   if (error) throw error;
