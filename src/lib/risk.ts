@@ -16,14 +16,20 @@ export type RiskPreCheckResult =
 // TODO: Real PnL sync with Alpaca for MAX_DAILY_LOSS_DOLLARS enforcement.
 // Currently only MAX_TRADES_PER_DAY and COOLDOWN are enforced.
 
+function getMinStopDistance(price: number): number {
+  const pctMin = price * (env.MIN_STOP_PCT ?? 0.003);
+  return Math.min(env.MIN_STOP_DISTANCE, Math.max(pctMin, 1e-10));
+}
+
 export async function preCheck(params: RiskPreCheckParams): Promise<RiskPreCheckResult> {
   const { price, stop } = params;
   const stopDistance = Math.abs(price - stop);
+  const minRequired = getMinStopDistance(price);
 
-  if (stopDistance < env.MIN_STOP_DISTANCE) {
+  if (stopDistance < minRequired) {
     return {
       ok: false,
-      reason: `Stop distance ${stopDistance.toFixed(4)} < MIN_STOP_DISTANCE ${env.MIN_STOP_DISTANCE}`,
+      reason: `Stop distance ${stopDistance.toFixed(6)} < min required ${minRequired.toFixed(6)} (MIN_STOP_DISTANCE ${env.MIN_STOP_DISTANCE} or ${((env.MIN_STOP_PCT ?? 0.003) * 100).toFixed(2)}% of price)`,
     };
   }
 
@@ -52,7 +58,7 @@ export async function preCheck(params: RiskPreCheckParams): Promise<RiskPreCheck
 
 export function computeQty(entry: number, stop: number): number {
   const stopDistance = Math.abs(entry - stop);
-  if (stopDistance < env.MIN_STOP_DISTANCE) return 0;
+  if (stopDistance < getMinStopDistance(entry)) return 0;
   const qty = Math.floor(env.RISK_PER_TRADE_DOLLARS / stopDistance);
   return Math.max(0, qty);
 }

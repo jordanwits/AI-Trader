@@ -52,6 +52,15 @@ export async function placeMarketOrder(
   return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
 }
 
+/** Rounds stop price to appropriate precision for Alpaca (avoids 0 for micro-cap crypto). */
+export function roundStopPrice(stopPrice: number): number {
+  if (stopPrice < 0.0001) return Math.round(stopPrice * 1e8) / 1e8;
+  if (stopPrice < 0.01) return Math.round(stopPrice * 1e6) / 1e6;
+  if (stopPrice < 1) return Math.round(stopPrice * 1e4) / 1e4;
+  if (stopPrice < 100) return Math.round(stopPrice * 1e3) / 1e3;
+  return Math.round(stopPrice * 100) / 100;
+}
+
 /** Place market order with a bracket stop-loss. Stop triggers at market when price hits stop_price. */
 export async function placeMarketOrderWithStopLoss(
   symbol: string,
@@ -59,7 +68,7 @@ export async function placeMarketOrderWithStopLoss(
   side: "buy" | "sell",
   stopPrice: number
 ): Promise<PlaceOrderResult> {
-  const stopRounded = Math.round(stopPrice * 100) / 100;
+  const stopRounded = roundStopPrice(stopPrice);
   const body = {
     symbol,
     qty: Math.floor(qty),
@@ -164,20 +173,29 @@ export async function getPositions(): Promise<AlpacaPosition[]> {
   return Array.isArray(data) ? data : [];
 }
 
-/** Returns true if symbol is tradeable on Alpaca. Skips AI when false to save tokens. Tries symbol as-is and +USD for crypto. */
-export async function isSymbolTradeable(symbol: string): Promise<boolean> {
-  const candidates = [symbol];
+function getSymbolCandidates(symbol: string): string[] {
   const clean = symbol.replace("/", "").toUpperCase();
+  const candidates = [clean];
   if (!clean.endsWith("USD") && !clean.endsWith("USDT") && !clean.endsWith("USDC")) {
     candidates.push(clean + "USD");
   }
-  for (const sym of candidates) {
+  return candidates;
+}
+
+/** Resolves ticker to Alpaca symbol format (e.g. DOGE -> DOGEUSD). Returns null if not tradeable. */
+export async function resolveAlpacaSymbol(symbol: string): Promise<string | null> {
+  for (const sym of getSymbolCandidates(symbol)) {
     try {
       const data = (await alpacaFetch("GET", `/v2/assets/${encodeURIComponent(sym)}`)) as { tradable?: boolean };
-      if (data?.tradable === true) return true;
+      if (data?.tradable === true) return sym;
     } catch {
       continue;
     }
   }
-  return false;
+  return null;
+}
+
+/** Returns true if symbol is tradeable on Alpaca. Skips AI when false to save tokens. */
+export async function isSymbolTradeable(symbol: string): Promise<boolean> {
+  return (await resolveAlpacaSymbol(symbol)) !== null;
 }

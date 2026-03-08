@@ -10,7 +10,7 @@ import {
 } from "@/lib/supabaseAdmin";
 import { preCheck, computeQty } from "@/lib/risk";
 import { decide } from "@/lib/aiDecider";
-import { placeMarketOrderWithStopLoss, isSymbolTradeable } from "@/lib/alpaca";
+import { placeMarketOrderWithStopLoss, resolveAlpacaSymbol } from "@/lib/alpaca";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import type { AlertPayload } from "@/lib/validate";
@@ -54,9 +54,9 @@ async function processAlertInBackground(
       return;
     }
 
-    // Skip AI if symbol not tradeable on Alpaca (order would fail anyway)
-    const tradeable = await isSymbolTradeable(parsed.ticker);
-    if (!tradeable) {
+    // Resolve to Alpaca symbol format (e.g. DOGE -> DOGEUSD). Skip AI if not tradeable.
+    const alpacaSymbol = await resolveAlpacaSymbol(parsed.ticker);
+    if (!alpacaSymbol) {
       await insertDecision({
         alert_id: alert.id,
         approve: false,
@@ -99,7 +99,7 @@ async function processAlertInBackground(
         status: "blocked",
         qty: 0,
         side: parsed.action.toLowerCase(),
-        symbol: parsed.ticker,
+        symbol: alpacaSymbol,
         error: "Qty <= 0 from risk compute",
       });
       logger.info("Alert blocked: qty <= 0", { alert_id: alert.id });
@@ -107,7 +107,7 @@ async function processAlertInBackground(
     }
 
     const order = await placeMarketOrderWithStopLoss(
-      parsed.ticker,
+      alpacaSymbol,
       qty,
       parsed.action === "BUY" ? "buy" : "sell",
       stop
@@ -118,14 +118,14 @@ async function processAlertInBackground(
       status: "placed",
       qty,
       side: parsed.action.toLowerCase(),
-      symbol: parsed.ticker,
+      symbol: alpacaSymbol,
       alpaca_order_id: order.alpaca_order_id,
       alpaca_raw: order.raw,
     });
 
     logger.info("Trade placed", {
       alert_id: alert.id,
-      symbol: parsed.ticker,
+      symbol: alpacaSymbol,
       alpaca_order_id: order.alpaca_order_id,
     });
   } catch (err) {
