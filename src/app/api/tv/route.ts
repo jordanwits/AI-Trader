@@ -34,8 +34,8 @@ async function processAlertInBackground(
     }
 
     // Skip AI if entry/stop is nonsensical (would reject anyway)
-    const { price: entry, stop, action } = parsed;
-    if (action === "BUY" && stop >= entry) {
+    const { price: entryPrice, stop: stopPrice, action } = parsed;
+    if (action === "BUY" && stopPrice >= entryPrice) {
       await insertDecision({
         alert_id: alert.id,
         approve: false,
@@ -44,7 +44,7 @@ async function processAlertInBackground(
       logger.info("Alert blocked: invalid stop/entry", { alert_id: alert.id });
       return;
     }
-    if (action === "SELL" && stop <= entry) {
+    if (action === "SELL" && stopPrice <= entryPrice) {
       await insertDecision({
         alert_id: alert.id,
         approve: false,

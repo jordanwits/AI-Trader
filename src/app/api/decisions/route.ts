@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     if (error) throw error;
 
-    const alertIds = [...new Set((decisions ?? []).map((d: { alert_id: string }) => d.alert_id).filter(Boolean))];
+    const alertIds = Array.from(new Set((decisions ?? []).map((d: { alert_id: string }) => d.alert_id).filter(Boolean)));
     const { data: alerts } = alertIds.length
       ? await client.from("alerts").select("id, received_at, ticker, action, price, stop, timeframe").in("id", alertIds)
       : { data: [] };
