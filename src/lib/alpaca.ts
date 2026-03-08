@@ -128,7 +128,21 @@ export async function placeMarketOrderWithStopLoss(
   return { alpaca_order_id: id, raw: raw as Record<string, unknown> };
 }
 
-/** Crypto: market order, poll for fill, then place SL and TP as separate orders. Recalculates SL/TP from actual fill to handle slippage. SELL = close long only (no SL/TP). */
+type FillResult = { price: number; filledQty: number };
+
+function extractFillFromOrder(order: AlpacaOrder | null): FillResult | null {
+  if (!order?.filled_avg_price) return null;
+  const price = parseFloat(order.filled_avg_price);
+  const filledQty = parseFloat(order.filled_qty ?? order.qty ?? "0");
+  if (!Number.isFinite(price) || filledQty < 1e-10) return null;
+  const isFilled =
+    order.status === "filled" ||
+    order.status === "partially_filled" ||
+    (order.status === "canceled" && filledQty > 0);
+  return isFilled ? { price, filledQty } : null;
+}
+
+/** Crypto: market order, poll for fill, then place SL and TP. Handles partial fills (IOC). Recalculates SL/TP from actual fill. SELL = close long only (no SL/TP). */
 async function placeCryptoOrderWithSlTp(
   symbol: string,
   qty: number,
@@ -150,12 +164,11 @@ async function placeCryptoOrderWithSlTp(
   const orderId = raw.id as string | undefined;
   if (!orderId) throw new Error("Alpaca returned no order id");
 
-  let filledPrice: number | null = await waitForOrderFill(orderId, 30_000);
-  if (filledPrice == null) {
+  let fill: FillResult | null = await waitForOrderFill(orderId, 30_000);
+  if (fill == null) {
     const lastCheck = await getOrder(orderId);
-    if (lastCheck?.status === "filled" && lastCheck.filled_avg_price) {
-      filledPrice = parseFloat(lastCheck.filled_avg_price);
-    } else {
+    fill = extractFillFromOrder(lastCheck);
+    if (fill == null) {
       throw new Error("Crypto market order did not fill within 30 seconds");
     }
   }
@@ -164,6 +177,7 @@ async function placeCryptoOrderWithSlTp(
     return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
   }
 
+  const { price: filledPrice, filledQty } = fill;
   const stopDistance = signalEntryPrice - stopPrice;
   const tpDistance = takeProfitPrice - signalEntryPrice;
   const slFromFill = filledPrice - stopDistance;
@@ -176,7 +190,7 @@ async function placeCryptoOrderWithSlTp(
   const exitSide = "sell";
   await alpacaFetch("POST", "/v2/orders", {
     symbol,
-    qty,
+    qty: filledQty,
     side: exitSide,
     type: "stop_limit",
     time_in_force: gtc,
@@ -185,7 +199,7 @@ async function placeCryptoOrderWithSlTp(
   });
   await alpacaFetch("POST", "/v2/orders", {
     symbol,
-    qty,
+    qty: filledQty,
     side: exitSide,
     type: "limit",
     time_in_force: gtc,
@@ -195,17 +209,17 @@ async function placeCryptoOrderWithSlTp(
   return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
 }
 
-async function waitForOrderFill(orderId: string, timeoutMs: number): Promise<number | null> {
+async function waitForOrderFill(orderId: string, timeoutMs: number): Promise<FillResult | null> {
   const start = Date.now();
   const pollMs = 500;
 
   while (Date.now() - start < timeoutMs) {
     const order = await getOrder(orderId);
-    if (!order) return null;
-    if (order.status === "filled" && order.filled_avg_price) {
-      return parseFloat(order.filled_avg_price);
-    }
-    if (order.status === "canceled" || order.status === "rejected" || order.status === "expired") {
+    const fill = extractFillFromOrder(order);
+    if (fill) return fill;
+    if (order && ["canceled", "rejected", "expired"].includes(order.status)) {
+      const partialFill = extractFillFromOrder(order);
+      if (partialFill) return partialFill;
       return null;
     }
     await new Promise((r) => setTimeout(r, pollMs));
@@ -262,6 +276,7 @@ export type AlpacaOrder = {
   id: string;
   symbol: string;
   qty: string;
+  filled_qty?: string;
   side: string;
   type: string;
   status: string;
