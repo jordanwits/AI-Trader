@@ -158,7 +158,7 @@ async function processAlertInBackground(
         status: "failed",
         qty: 0,
         side: parsed.action.toLowerCase(),
-        symbol: alpacaSymbol ?? parsed.ticker,
+        symbol: parsed.ticker,
         error: msg,
       });
     } catch (insertErr) {
