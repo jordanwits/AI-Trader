@@ -155,7 +155,7 @@ async function placeEquityOrderWithSlTp(
   const { sl, tp } = clampStopTp("buy", slFromFill, tpFromFill, filledPrice);
   const slRounded = roundStopPrice(sl);
   const tpRounded = roundStopPrice(tp);
-  const slLimit = roundStopPrice(Math.min(slRounded, slRounded * 0.999));
+  const slLimit = roundStopPrice(Math.min(slRounded, slRounded * 0.98));
 
   await alpacaFetch("POST", "/v2/orders", {
     symbol,
@@ -232,6 +232,8 @@ async function placeCryptoOrderWithSlTp(
 
   const gtc = "gtc";
   const exitSide = "sell";
+  // Stop loss: use limit 2% below stop so we get filled when stop triggers (price can gap down)
+  const slLimit = roundStopPrice(Math.min(slRounded, slRounded * 0.98));
   await alpacaFetch("POST", "/v2/orders", {
     symbol,
     qty: filledQty,
@@ -239,7 +241,7 @@ async function placeCryptoOrderWithSlTp(
     type: "stop_limit",
     time_in_force: gtc,
     stop_price: String(slRounded),
-    limit_price: String(Math.min(slRounded, roundStopPrice(slRounded * 0.999))),
+    limit_price: String(slLimit),
   });
   await alpacaFetch("POST", "/v2/orders", {
     symbol,
