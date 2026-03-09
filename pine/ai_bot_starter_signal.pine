@@ -1,13 +1,17 @@
 //@version=5
 indicator("AI Bot Starter Signal", overlay=true, max_boxes_count=500, max_labels_count=500)
 
-// Inputs (aggressive defaults)
-stop_atr_mult = input.float(1.5, "Stop ATR Multiplier", minval=0.5, step=0.1)
-rsi_ob = input.int(80, "RSI Overbought", minval=50, maxval=90, tooltip="Higher = allow more overbought longs")
-rsi_os = input.int(20, "RSI Oversold", minval=10, maxval=50, tooltip="Lower = allow more oversold shorts")
-min_adx = input.int(10, "Min ADX (Trend Strength)", minval=5, maxval=50, tooltip="Lower = more signals")
-vol_mult = input.float(0.85, "Volume Multiplier", minval=0.5, step=0.05, tooltip="Lower = accept lower volume")
-use_vwap_filter = input.bool(false, "Use VWAP Filter", tooltip="Off = more signals, ignore VWAP")
+// Inputs (conservative defaults - fewer but higher-quality signals)
+stop_atr_mult = input.float(2.0, "Stop ATR Multiplier", minval=0.5, step=0.1, tooltip="Higher = wider stop, fewer false stops")
+rsi_ob = input.int(70, "RSI Overbought", minval=50, maxval=90, tooltip="Lower = avoid longs in overbought zone")
+rsi_os = input.int(30, "RSI Oversold", minval=10, maxval=50, tooltip="Higher = avoid shorts in oversold zone")
+min_adx = input.int(18, "Min ADX (Trend Strength)", minval=5, maxval=50, tooltip="Higher = require stronger trend")
+vol_mult = input.float(1.05, "Volume Multiplier", minval=0.5, step=0.05, tooltip="Higher = require above-avg volume")
+use_vwap_filter = input.bool(true, "Use VWAP Filter", tooltip="On = long above VWAP, short below VWAP only")
+
+// Market hours (US equities) - avoid new signals near close
+use_market_hours_filter = input.bool(true, "Block Signals Near Market Close", group="Market Hours", tooltip="On = no new signals in last N min of session")
+mins_before_close = input.int(45, "Minutes Before Close to Stop Signals", minval=15, maxval=120, group="Market Hours", tooltip="No new entries in last N min before 4 PM ET")
 
 // Indicators
 ema9 = ta.ema(close, 9)
@@ -26,8 +30,16 @@ vol_spike = volume > vol_avg * vol_mult
 // Improved Signals with filters (VWAP optional when use_vwap_filter off)
 vwap_ok_long = use_vwap_filter ? close > vwap_val : true
 vwap_ok_short = use_vwap_filter ? close < vwap_val : true
-longSignal = ta.crossover(ema9, ema21) and vwap_ok_long and rsi_val < rsi_ob and adx_val > min_adx and vol_spike
-shortSignal = ta.crossunder(ema9, ema21) and vwap_ok_short and rsi_val > rsi_os and adx_val > min_adx and vol_spike
+
+// US session: block signals within N min of 4 PM ET (avoid late entries that get dumped at close)
+ny_h = hour(time, "America/New_York")
+ny_m = minute(time, "America/New_York")
+ny_minutes = ny_h * 60 + ny_m
+close_minutes = 16 * 60  // 4 PM ET
+ok_time = not (timeframe.isintraday and use_market_hours_filter and ny_minutes >= close_minutes - mins_before_close)
+
+longSignal = ta.crossover(ema9, ema21) and vwap_ok_long and rsi_val < rsi_ob and adx_val > min_adx and vol_spike and ok_time
+shortSignal = ta.crossunder(ema9, ema21) and vwap_ok_short and rsi_val > rsi_os and adx_val > min_adx and vol_spike and ok_time
 
 // ATR-based stops (adapts to volatility). Ensure short_stop > close (min 0.01% gap for shorts).
 min_short_gap = close * 0.0001

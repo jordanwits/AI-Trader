@@ -1,8 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/cleanup-orders",
-      "schedule": "0 6 * * *"
+      "path": "/api/cron/close-equities-before-close",
+      "schedule": "45 19 * * 1-5"
     }
   ]
 }

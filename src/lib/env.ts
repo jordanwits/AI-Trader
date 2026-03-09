@@ -15,6 +15,7 @@ const envSchema = z.object({
   MAX_TRADES_PER_DAY: z.coerce.number().default(30),
   MAX_DAILY_LOSS_DOLLARS: z.coerce.number().default(500),
   COOLDOWN_SECONDS: z.coerce.number().default(30),
+  MINUTES_BEFORE_CLOSE_NO_ENTRY: z.coerce.number().default(45),
   MIN_STOP_DISTANCE: z.coerce.number().default(0.02),
   MIN_STOP_PCT: z.coerce.number().default(0.002),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),

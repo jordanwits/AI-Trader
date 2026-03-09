@@ -423,3 +423,38 @@ export async function cancelOrder(orderId: string): Promise<boolean> {
 export async function isSymbolTradeable(symbol: string): Promise<boolean> {
   return (await resolveAlpacaSymbol(symbol)) !== null;
 }
+
+export type AlpacaClock = {
+  timestamp: string; // RFC-3339
+  is_open: boolean;
+  next_open: string;
+  next_close: string;
+};
+
+/** Get market clock. Used for equity market hours (crypto is 24/7). */
+export async function getClock(): Promise<AlpacaClock> {
+  const data = (await alpacaFetch("GET", "/v2/clock")) as AlpacaClock;
+  return data;
+}
+
+/** True if within N minutes of US equity market close (4 PM ET). Crypto ignores. */
+export async function isNearMarketClose(minutesBefore: number): Promise<boolean> {
+  const clock = await getClock();
+  const nextClose = new Date(clock.next_close).getTime();
+  const now = Date.now();
+  return nextClose - now <= minutesBefore * 60 * 1000;
+}
+
+/** Close a single position (liquidate). Cancels open orders for that symbol first. */
+export async function closePosition(symbol: string): Promise<boolean> {
+  const openOrders = await getOrders({ status: "open", symbols: [symbol] });
+  for (const order of openOrders) {
+    await cancelOrder(order.id);
+  }
+  try {
+    await alpacaFetch("DELETE", `/v2/positions/${encodeURIComponent(symbol)}`);
+    return true;
+  } catch {
+    return false;
+  }
+}

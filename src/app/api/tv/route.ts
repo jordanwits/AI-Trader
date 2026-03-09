@@ -10,7 +10,7 @@ import {
 } from "@/lib/supabaseAdmin";
 import { preCheck, computeQty } from "@/lib/risk";
 import { decide } from "@/lib/aiDecider";
-import { placeMarketOrderWithStopLoss, resolveAlpacaSymbol, getAccount, getAssetClass } from "@/lib/alpaca";
+import { placeMarketOrderWithStopLoss, resolveAlpacaSymbol, getAccount, getAssetClass, isNearMarketClose } from "@/lib/alpaca";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import type { AlertPayload } from "@/lib/validate";
@@ -44,6 +44,20 @@ async function processAlertInBackground(
       });
       logger.info("Alert blocked: crypto short not supported", { alert_id: alert.id, symbol: alpacaSymbol });
       return;
+    }
+
+    // Block new equity entries near market close - exit planning happens via cron
+    if (assetClass === "us_equity") {
+      const nearClose = await isNearMarketClose(env.MINUTES_BEFORE_CLOSE_NO_ENTRY);
+      if (nearClose) {
+        await insertDecision({
+          alert_id: alert.id,
+          approve: false,
+          blocked_reason: `Market closing soon - no new entries within ${env.MINUTES_BEFORE_CLOSE_NO_ENTRY} min of 4 PM ET`,
+        });
+        logger.info("Alert blocked: near market close", { alert_id: alert.id, symbol: alpacaSymbol });
+        return;
+      }
     }
 
     const riskResult = await preCheck({ price: parsed.price, stop: parsed.stop, symbol: alpacaSymbol });

@@ -9,8 +9,8 @@ ema_trend_len = input.int(50, "Trend EMA", minval=30, maxval=100, group="Trend")
 
 // Momentum
 rsi_len = input.int(14, "RSI Length", minval=5, maxval=25, group="Momentum")
-rsi_ob = input.int(70, "RSI Overbought", minval=60, maxval=85, group="Momentum")
-rsi_os = input.int(30, "RSI Oversold", minval=15, maxval=40, group="Momentum")
+rsi_ob = input.int(65, "RSI Overbought", minval=60, maxval=85, group="Momentum", tooltip="Lower = avoid longs near overbought")
+rsi_os = input.int(35, "RSI Oversold", minval=15, maxval=40, group="Momentum", tooltip="Higher = avoid shorts near oversold")
 stoch_k = input.int(14, "Stochastic K", minval=5, maxval=21, group="Momentum")
 stoch_d = input.int(3, "Stochastic D", minval=2, maxval=5, group="Momentum")
 stoch_smooth = input.int(3, "Stochastic Smooth", minval=2, maxval=5, group="Momentum")
@@ -24,18 +24,22 @@ bb_mult = input.float(2.0, "Bollinger Multiplier", minval=1.5, maxval=3.0, step=
 
 // Volume
 vol_ma_len = input.int(20, "Volume MA Length", minval=10, maxval=50, group="Volume")
-vol_mult = input.float(0.85, "Volume Spike Multiplier", minval=0.5, maxval=3.0, step=0.05, group="Volume", tooltip="Lower = more signals (0.85 = 85% of avg volume OK)")
+vol_mult = input.float(1.1, "Volume Spike Multiplier", minval=0.5, maxval=3.0, step=0.05, group="Volume", tooltip="Higher = require above-avg volume (1.1 = 110%)")
 
-// Filters (aggressive defaults)
-min_adx = input.int(10, "Min ADX", minval=5, maxval=35, group="Filters", tooltip="Lower = more signals, less trend confirmation")
-use_obv_filter = input.bool(false, "Use OBV Filter", group="Filters", tooltip="Off = more signals. On = require OBV confirmation")
-use_vwap = input.bool(false, "Use VWAP Filter", group="Filters")
-use_htf_trend = input.bool(false, "Use Higher TF Trend", group="Filters")
+// Filters (conservative defaults - fewer but higher-quality signals)
+min_adx = input.int(20, "Min ADX", minval=5, maxval=35, group="Filters", tooltip="Higher = require stronger trend")
+use_obv_filter = input.bool(true, "Use OBV Filter", group="Filters", tooltip="On = require OBV confirmation")
+use_vwap = input.bool(true, "Use VWAP Filter", group="Filters")
+use_htf_trend = input.bool(true, "Use Higher TF Trend", group="Filters", tooltip="On = align with higher timeframe")
 htf_ema_len = input.int(21, "HTF EMA Length", minval=10, maxval=50, group="Filters")
 
 // Noise Reduction
 use_heikin_ashi = input.bool(true, "Use Heikin Ashi for Signals", group="Noise Reduction")
-confirm_bars = input.int(0, "Confirmation Bars", minval=0, maxval=3, group="Noise Reduction")
+confirm_bars = input.int(1, "Confirmation Bars", minval=0, maxval=3, group="Noise Reduction", tooltip="Higher = require signal to hold N bars")
+
+// Market Hours (US equities only - crypto is 24/7)
+use_market_hours_filter = input.bool(false, "Block Signals Near 4 PM ET", group="Market Hours", tooltip="Off by default - crypto never closes. Enable only if trading US equities with this script.")
+mins_before_close = input.int(45, "Minutes Before Close to Stop Signals", minval=15, maxval=120, group="Market Hours")
 
 // === HEIKIN ASHI CALCULATION ===
 ha_close = (open + high + low + close) / 4
@@ -67,9 +71,9 @@ htf_filter_short = use_htf_trend ? htf_bearish : true
 
 // === MOMENTUM INDICATORS ===
 rsi_val = ta.rsi(src_close, rsi_len)
-// Widened RSI bands to fix conflicts with pullback/breakout/reversal (aggressive)
-rsi_bullish = rsi_val > 25 and rsi_val < rsi_ob
-rsi_bearish = rsi_val > rsi_os and rsi_val < 75
+// Tighter RSI bands - avoid extreme zones for higher-quality signals
+rsi_bullish = rsi_val > 35 and rsi_val < rsi_ob
+rsi_bearish = rsi_val > rsi_os and rsi_val < 65
 
 stoch_k_raw = ta.stoch(src_close, src_high, src_low, stoch_k)
 stoch_k_smooth = ta.sma(stoch_k_raw, stoch_smooth)
@@ -126,17 +130,17 @@ vwap_bearish = use_vwap ? close < vwap_val : true
 ema_cross_up = ta.crossover(ema_fast, ema_slow)
 ema_cross_down = ta.crossunder(ema_fast, ema_slow)
 
-// Pullback entries (trend continuation)
-pullback_long = trend_bullish and src_close < ema_slow and src_close > ema_trend and rsi_val < 45
-pullback_short = trend_bearish and src_close > ema_slow and src_close < ema_trend and rsi_val > 55
+// Pullback entries (trend continuation - tighter RSI to avoid chasing)
+pullback_long = trend_bullish and src_close < ema_slow and src_close > ema_trend and rsi_val < 40
+pullback_short = trend_bearish and src_close > ema_slow and src_close < ema_trend and rsi_val > 60
 
 // Breakout entries (bb_expanding optional for more signals)
 breakout_long = ta.crossover(src_close, bb_upper) and vol_spike
 breakout_short = ta.crossunder(src_close, bb_lower) and vol_spike
 
-// Reversal entries (relaxed: no vol_spike required for reversals)
-reversal_long = rsi_higher_low and stoch_bullish and price_near_bb_lower
-reversal_short = rsi_lower_high and stoch_bearish and price_near_bb_upper
+// Reversal entries (require volume confirmation - reversals are noisy)
+reversal_long = rsi_higher_low and stoch_bullish and price_near_bb_lower and vol_spike
+reversal_short = rsi_lower_high and stoch_bearish and price_near_bb_upper and vol_spike
 
 // Confirmation tracking
 var int long_confirm_count = 0
@@ -152,8 +156,15 @@ long_filters = rsi_bullish and strong_trend and di_bullish and vwap_bullish and 
 short_filters = rsi_bearish and strong_trend and di_bearish and vwap_bearish and obv_ok_short and htf_filter_short
 
 // Volume confirmation (relaxed - vol_mult 0.85 allows below-avg volume)
-filtered_long = base_long and long_filters and vol_spike
-filtered_short = base_short and short_filters and vol_spike
+// US session: block signals within N min of 4 PM ET (avoid late entries dumped at close)
+ny_h = hour(time, "America/New_York")
+ny_m = minute(time, "America/New_York")
+ny_minutes = ny_h * 60 + ny_m
+close_minutes = 16 * 60
+ok_time = not (timeframe.isintraday and use_market_hours_filter and ny_minutes >= close_minutes - mins_before_close)
+
+filtered_long = base_long and long_filters and vol_spike and ok_time
+filtered_short = base_short and short_filters and vol_spike and ok_time
 
 // Confirmation bar logic
 if filtered_long
