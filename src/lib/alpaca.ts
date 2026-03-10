@@ -143,31 +143,53 @@ async function placeEquityOrderWithSlTp(
     }
   }
 
-  if (side === "sell") {
-    return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
-  }
-
   const { price: filledPrice, filledQty } = fill;
-  const stopDistance = signalEntryPrice - stopPrice;
-  const tpDistance = takeProfitPrice - signalEntryPrice;
-  const slFromFill = filledPrice - stopDistance;
-  const tpFromFill = filledPrice + tpDistance;
-  const { sl, tp } = clampStopTp("buy", slFromFill, tpFromFill, filledPrice);
-  const slRounded = roundStopPrice(sl);
-  const tpRounded = roundStopPrice(tp);
-  const slLimit = roundStopPrice(Math.min(slRounded, slRounded * 0.98));
 
-  await alpacaFetch("POST", "/v2/orders", {
-    symbol,
-    qty: Math.floor(filledQty),
-    side: "sell",
-    type: "limit",
-    limit_price: String(tpRounded),
-    time_in_force: "gtc",
-    order_class: "oco",
-    take_profit: { limit_price: String(tpRounded) },
-    stop_loss: { stop_price: String(slRounded), limit_price: String(slLimit) },
-  });
+  if (side === "buy") {
+    // Long: SL below entry, TP above. Close with sell OCO.
+    const stopDistance = signalEntryPrice - stopPrice;
+    const tpDistance = takeProfitPrice - signalEntryPrice;
+    const slFromFill = filledPrice - stopDistance;
+    const tpFromFill = filledPrice + tpDistance;
+    const { sl, tp } = clampStopTp("buy", slFromFill, tpFromFill, filledPrice);
+    const slRounded = roundStopPrice(sl);
+    const tpRounded = roundStopPrice(tp);
+    const slLimit = roundStopPrice(Math.min(slRounded, slRounded * 0.98));
+
+    await alpacaFetch("POST", "/v2/orders", {
+      symbol,
+      qty: Math.floor(filledQty),
+      side: "sell",
+      type: "limit",
+      limit_price: String(tpRounded),
+      time_in_force: "gtc",
+      order_class: "oco",
+      take_profit: { limit_price: String(tpRounded) },
+      stop_loss: { stop_price: String(slRounded), limit_price: String(slLimit) },
+    });
+  } else {
+    // Short: SL above entry, TP below. Close with buy OCO (buy to cover).
+    const stopDistance = stopPrice - signalEntryPrice;
+    const tpDistance = signalEntryPrice - takeProfitPrice;
+    const slFromFill = filledPrice + stopDistance;
+    const tpFromFill = filledPrice - tpDistance;
+    const { sl, tp } = clampStopTp("sell", slFromFill, tpFromFill, filledPrice);
+    const slRounded = roundStopPrice(sl);
+    const tpRounded = roundStopPrice(tp);
+    const slLimit = roundStopPrice(Math.max(slRounded, slRounded * 1.02));
+
+    await alpacaFetch("POST", "/v2/orders", {
+      symbol,
+      qty: Math.floor(filledQty),
+      side: "buy",
+      type: "limit",
+      limit_price: String(tpRounded),
+      time_in_force: "gtc",
+      order_class: "oco",
+      take_profit: { limit_price: String(tpRounded) },
+      stop_loss: { stop_price: String(slRounded), limit_price: String(slLimit) },
+    });
+  }
 
   return { alpaca_order_id: orderId, raw: raw as Record<string, unknown> };
 }

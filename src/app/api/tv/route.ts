@@ -129,17 +129,25 @@ async function processAlertInBackground(
       entry = parsed.price;
       stop = parsed.stop;
     }
-    const target = aiResult.decision.target;
-    if (target == null || !Number.isFinite(target)) {
+    const target =
+      aiResult.decision.target != null && Number.isFinite(aiResult.decision.target)
+        ? aiResult.decision.target
+        : parsed.take_profit != null && Number.isFinite(parsed.take_profit)
+          ? parsed.take_profit
+          : parsed.action === "BUY"
+            ? entry + (entry - stop)
+            : entry - (stop - entry);
+
+    if (!Number.isFinite(target)) {
       await insertTrade({
         decision_id: decision.id,
         status: "failed",
         qty: 0,
         side: parsed.action.toLowerCase(),
         symbol: alpacaSymbol,
-        error: "AI did not return valid target (required for Alpaca bracket order)",
+        error: "Could not compute target: AI returned none, payload has no take_profit, and 1:1 R:R failed",
       });
-      logger.info("Alert blocked: no target", { alert_id: alert.id });
+      logger.info("Alert blocked: no valid target", { alert_id: alert.id });
       return;
     }
 

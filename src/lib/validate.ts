@@ -9,6 +9,7 @@ export const AlertPayloadSchema = z.object({
   action: z.enum(["BUY", "SELL"]),
   price: z.number().finite(),
   stop: z.number().finite(),
+  take_profit: z.number().finite().optional(),
   meta: MetaSchema,
 });
 
